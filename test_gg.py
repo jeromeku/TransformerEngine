@@ -31,6 +31,22 @@ from transformer_engine.pytorch.utils import (
     is_bf16_compatible,
 )
 
+from viztracer import VizTracer
+from types import ModuleType
+
+from contextlib import nullcontext
+
+class DummyTracer(nullcontext):
+    def start(self):
+        self.__enter__()
+        return self
+    
+    def stop(self):
+        self.__exit__()
+    
+    def save(self, *args, **kwargs):
+        pass
+
 batch_sizes = [1]
 
 # Only run FP8 tests on supported devices.
@@ -57,6 +73,35 @@ _cuda_rng_state = torch.cuda.get_rng_state()
 torch._dynamo.config.recompile_limit = 16
 
 
+def get_module_root(module: str | ModuleType):
+    from pathlib import Path
+    import importlib
+
+    if isinstance(module, str):
+        try:
+            module = importlib.import_module(module)
+        except ImportError as e:
+            raise ImportError(f"Could not import module: {module}") from e
+
+    if not isinstance(module, ModuleType):
+        raise TypeError("Input must be a module or a string representing a module.")
+
+    if not hasattr(module, "__file__") or module.__file__ is None:
+        raise AttributeError(
+            f"The module '{module.__name__}' is a built-in module or a namespace package and has no file path."
+        )
+
+    return Path(module.__file__).parent.resolve().as_posix()
+
+SHOULD_TRACE = os.getenv("RUN_TRACE", "0") == "1"
+TRANSFORMER_ROOT = get_module_root("transformer_engine")
+
+def setup_tracer(include_files=None, exclude_files=None, log_torch=True, ignore_c_function=False, ignore_frozen=True, log_func_args=True, log_func_retval=True, **kwargs):
+    print(f"{include_files=} {exclude_files=}")
+    tracer = VizTracer(include_files=include_files, exclude_files=exclude_files, log_torch=log_torch, ignore_c_function=ignore_c_function, ignore_frozen=ignore_frozen, log_func_args=log_func_args, log_func_retval=log_func_retval, **kwargs)
+
+    return tracer
+
 def reset_rng_states() -> None:
     """revert back to initial RNG state."""
     torch.set_rng_state(_cpu_rng_state)
@@ -73,7 +118,10 @@ def _test_grouped_linear_accuracy(
     fp8,
     fuse_wgrad_accumulation,
     delay_wgrad_compute=False,
+    tracer=None
 ):
+    tracer = tracer or DummyTracer()
+
     reset_rng_states()
     if fp8:
         FP8GlobalStateManager.reset()
@@ -101,10 +149,15 @@ def _test_grouped_linear_accuracy(
     else:
         m_splits = torch.tensor([config.seq_len])
 
+    tracer.output_file = "traces/grouped_linear.forward.json"
+    tracer.log_torch = False
+    tracer.include_files = None
+    tracer.exclude_files = None
+    tracer.start()
     with fp8_autocast(enabled=fp8, fp8_recipe=recipe):
         if isinstance(block, GroupedLinear):
             m_splits = m_splits * bs
-            out = block(inp_hidden_states, m_splits.tolist())
+            out = block.forward(inp_hidden_states, m_splits.tolist())
         else:
             out = torch.cat(
                 [
@@ -112,14 +165,22 @@ def _test_grouped_linear_accuracy(
                     for i, inp in enumerate(torch.split(inp_hidden_states, m_splits.tolist()))
                 ]
             )
+    tracer.stop()
+    tracer.save()
+
     loss = out.sum()
     loss.backward()
+    
+    tracer.output_file = "traces/grouped_linear.backward_dw.json"
+    tracer.start()
     if delay_wgrad_compute:
         if isinstance(block, GroupedLinear):
             block.backward_dw()
         else:
             for i in range(num_gemms):
                 block[i].backward_dw()
+    tracer.stop()
+    tracer.save()
 
     torch.cuda.synchronize()
     outputs = [out, inp_hidden_states.grad]
@@ -142,6 +203,7 @@ def _test_grouped_linear_accuracy(
 # @pytest.mark.parametrize("fuse_wgrad_accumulation", all_boolean)
 # @pytest.mark.parametrize("bias", all_boolean)
 # @pytest.mark.parametrize("delay_wgrad_compute", all_boolean)
+
 def test_grouped_linear_accuracy(
     dtype=torch.float32,
     num_gemms=4,
@@ -155,20 +217,28 @@ def test_grouped_linear_accuracy(
     parallel_mode=None,
 ):
     fp8 = recipe is not None
-    if fp8 and not fp8_available:
-        pytest.skip(reason_for_no_fp8)
-    if fp8 and recipe.mxfp8() and not mxfp8_available:
-        pytest.skip(reason_for_no_mxfp8)
-    if fp8_model_params and NVTE_TEST_NVINSPECT_ENABLED:
-        pytest.skip("FP8 parameters are not supported in debug mode.")
-    if fp8 and recipe.float8_block_scaling() and not fp8_block_scaling_available:
-        pytest.skip(reason_for_no_fp8_block_scaling)
+  
+    # if fp8 and not fp8_available:
+    #     pytest.skip(reason_for_no_fp8)
+    # if fp8 and recipe.mxfp8() and not mxfp8_available:
+    #     pytest.skip(reason_for_no_mxfp8)
+    # if fp8_model_params and NVTE_TEST_NVINSPECT_ENABLED:
+    #     pytest.skip("FP8 parameters are not supported in debug mode.")
+    # if fp8 and recipe.float8_block_scaling() and not fp8_block_scaling_available:
+    #     pytest.skip(reason_for_no_fp8_block_scaling)
 
     config = model_configs[model]
     print(f"MODEL CONFIG: {config=}")
-    if config.seq_len % 16 != 0 and fp8:
-        pytest.skip("FP8 requires sequence length to be divisible by 16.")
 
+    # if config.seq_len % 16 != 0 and fp8:
+    #     pytest.skip("FP8 requires sequence length to be divisible by 16.")
+    if SHOULD_TRACE:
+        tracer = setup_tracer(exclude_files=[".venv", "/home/jeromeku/.local/"], ignore_c_function=False, ignore_frozen=False, log_torch=False)
+    else:
+        tracer = DummyTracer()
+
+    tracer.output_file = "traces/grouped_linear.setup.json"
+    tracer.start()
     with fp8_model_init(enabled=fp8 and fp8_model_params, recipe=recipe):
         grouped_linear = GroupedLinear(
             num_gemms,
@@ -181,6 +251,9 @@ def test_grouped_linear_accuracy(
             fuse_wgrad_accumulation=fuse_wgrad_accumulation,
             delay_wgrad_compute=delay_wgrad_compute,
         ).eval()
+        tracer.stop()
+        tracer.save()
+    
         sequential_linear = torch.nn.ModuleList(
             [
                 Linear(
@@ -228,6 +301,7 @@ def test_grouped_linear_accuracy(
         fp8,
         fuse_wgrad_accumulation,
         delay_wgrad_compute,
+        tracer=tracer
     )
 
     # Shoule be bit-wise match
@@ -239,6 +313,7 @@ if __name__ == "__main__":
     num_gemms = 4
     batch_size = 1
     test_grouped_linear_accuracy(dtype=dtype, num_gemms=num_gemms, bs=batch_size)
+
 # @pytest.mark.parametrize("recipe", fp8_recipes + [None])
 # def test_grouped_linear_accuracy_single_gemm(recipe):
 #     """Split the tests to save CI time"""
