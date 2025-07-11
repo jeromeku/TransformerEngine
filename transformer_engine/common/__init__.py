@@ -118,7 +118,7 @@ def load_framework_extension(framework: str) -> None:
     Load shared library with Transformer Engine framework bindings
     and check verify correctness if installed via PyPI.
     """
-
+    
     # Supported frameworks.
     assert framework in ("jax", "torch"), f"Unsupported framework {framework}"
 
@@ -161,8 +161,7 @@ def load_framework_extension(framework: str) -> None:
                 "Could not find package %s. Install transformer-engine using "
                 f"'pip3 install transformer-engine[{extra_dep_name}]==VERSION'",
                 module_name,
-            )
-
+            )    
     # After all checks are completed, load the shared object file.
     spec = importlib.util.spec_from_file_location(module_name, _get_shared_object_file(framework))
     solib = importlib.util.module_from_spec(spec)

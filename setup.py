@@ -8,7 +8,7 @@ import os
 import time
 from pathlib import Path
 from typing import List, Tuple
-
+import sys
 import setuptools
 from wheel.bdist_wheel import bdist_wheel
 
@@ -27,6 +27,8 @@ current_file_path = Path(__file__).parent.resolve()
 from setuptools.command.build_ext import build_ext as BuildExtension
 
 os.environ["NVTE_PROJECT_BUILDING"] = "1"
+print(f"SETUP::DEBUG: {frameworks=}")
+sys.exit(0)
 
 if "pytorch" in frameworks:
     from torch.utils.cpp_extension import BuildExtension
