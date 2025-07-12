@@ -204,6 +204,16 @@ def _test_grouped_linear_accuracy(
 # @pytest.mark.parametrize("bias", all_boolean)
 # @pytest.mark.parametrize("delay_wgrad_compute", all_boolean)
 
+# Notes:
+# see /home/jeromeku/transformerengine/transformer_engine/pytorch/module/base.py reset_parameters
+# also see float8_tensor and quantizedtensor subclasses for __torch_dispatch__ FSDP2 handling
+# grouped_linear => general_grouped_gemm => multi_stream_cublas => for loop individual gemms on multiple streams
+# weights are N x K k-major, inputs are M x K K major
+# weights are operand A, inputs are operand B, layout is "TN" => (N x K) (K x M)
+# "N" => for operand A => row-major is transposed so K = shape[0], M = shape[1]
+#     => for operand B => N is shape[0], K = shape[1]
+# Want M x N row-major out, equivalent to N x M col-major
+# (M x N)_T = ((M x K) x (K x N))_T => (N x K) x (K x M)
 def test_grouped_linear_accuracy(
     dtype=torch.float32,
     num_gemms=4,
