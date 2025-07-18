@@ -405,22 +405,49 @@ def bench_grouped_linear(
     out = grouped_linear(inp_hidden_states, m_sizes)
     seq_out = run_sequential(sequential_linear, inp_hidden_states, m_splits)
     assert out.allclose(seq_out)
+
+    import torch.profiler.python_tracer as python_tracer
+    from torch.profiler import ProfilerActivity, profiler, ProfilerAction
+    from torch._C._profiler import _ExperimentalConfig
     
+    def run_torch_profiler(f, save_dir, *args, **kwargs):
+        prof = profiler.profile(
+            activities=[ProfilerActivity.CUDA, ProfilerActivity.CPU],
+            record_shapes=True,
+            with_stack=True,
+            with_flops=True,
+            experimental_config=_ExperimentalConfig(verbose=True),
+            on_trace_ready=profiler.tensorboard_trace_handler(save_dir)
+        )
+        with prof:
+            for _ in range(5):
+                f(*args, **kwargs)
+        
+        tab = prof.key_averages().table(sort_by="self_cuda_time_total", max_name_column_width=100, max_src_column_width=100, row_limit=-1)
+        print(tab)
+
     def run_grouped_linear(grouped_linear, inputs: torch.Tensor, m_splits: torch.Tensor):
         return grouped_linear(inputs, m_splits.tolist())
-    
+
     g_time = do_bench(lambda: run_grouped_linear(grouped_linear, inp_hidden_states, m_splits))
     s_time = do_bench(lambda: run_sequential(sequential_linear, inp_hidden_states, m_splits))
     print(f"{g_time:.4f}ms | {s_time:.4f}ms: {s_time / g_time:.1f}x")
 
+    run_torch_profiler(grouped_linear, "trace/grouped", inp_hidden_states, m_sizes)
+    run_torch_profiler(run_sequential, "trace/sequential", sequential_linear, inp_hidden_states, m_splits)
+
 if __name__ == "__main__":
     dtype = torch.float32
-    num_gemms = 4
+    num_gemms = 128
+    topk = 8
     bs = 1
     seqlen = 1024
+    seqlen *= topk
     hidden_size = 768
     # test_grouped_linear_accuracy(dtype=dtype, num_gemms=num_gemms, bs=batch_size)
-    bench_grouped_linear(dtype=dtype,num_gemms=num_gemms, bs=bs, seqlen=seqlen, hidden_size=hidden_size)
+    bench_grouped_linear(
+        dtype=dtype, num_gemms=num_gemms, bs=bs, seqlen=seqlen, hidden_size=hidden_size
+    )
 
 # @pytest.mark.parametrize("recipe", fp8_recipes + [None])
 # def test_grouped_linear_accuracy_single_gemm(recipe):
