@@ -32,16 +32,18 @@ from types import ModuleType
 
 from contextlib import nullcontext
 
+
 class DummyTracer(nullcontext):
     def start(self):
         self.__enter__()
         return self
-    
+
     def stop(self):
         self.__exit__()
-    
+
     def save(self, *args, **kwargs):
         pass
+
 
 batch_sizes = [1]
 
@@ -89,19 +91,41 @@ def get_module_root(module: str | ModuleType):
 
     return Path(module.__file__).parent.resolve().as_posix()
 
+
 SHOULD_TRACE = os.getenv("RUN_TRACE", "0") == "1"
 TRANSFORMER_ROOT = get_module_root("transformer_engine")
 
-def setup_tracer(include_files=None, exclude_files=None, log_torch=True, ignore_c_function=False, ignore_frozen=True, log_func_args=True, log_func_retval=True, **kwargs):
+
+def setup_tracer(
+    include_files=None,
+    exclude_files=None,
+    log_torch=True,
+    ignore_c_function=False,
+    ignore_frozen=True,
+    log_func_args=True,
+    log_func_retval=True,
+    **kwargs,
+):
     print(f"{include_files=} {exclude_files=}")
-    tracer = VizTracer(include_files=include_files, exclude_files=exclude_files, log_torch=log_torch, ignore_c_function=ignore_c_function, ignore_frozen=ignore_frozen, log_func_args=log_func_args, log_func_retval=log_func_retval, **kwargs)
+    tracer = VizTracer(
+        include_files=include_files,
+        exclude_files=exclude_files,
+        log_torch=log_torch,
+        ignore_c_function=ignore_c_function,
+        ignore_frozen=ignore_frozen,
+        log_func_args=log_func_args,
+        log_func_retval=log_func_retval,
+        **kwargs,
+    )
 
     return tracer
+
 
 def reset_rng_states() -> None:
     """revert back to initial RNG state."""
     torch.set_rng_state(_cpu_rng_state)
     torch.cuda.set_rng_state(_cuda_rng_state)
+
 
 def get_split_sizes(num_gemms, seqlen, split_size=1):
     m = seqlen // split_size
@@ -111,6 +135,7 @@ def get_split_sizes(num_gemms, seqlen, split_size=1):
     m_splits = m_splits * split_size
     assert m_splits.sum() == seqlen and len(m_splits) == num_gemms
     return m_splits
+
 
 def _test_grouped_linear_accuracy(
     block,
@@ -122,10 +147,9 @@ def _test_grouped_linear_accuracy(
     fp8,
     fuse_wgrad_accumulation,
     delay_wgrad_compute=False,
-    inp_hidden_states = None,
-    m_splits = None
+    inp_hidden_states=None,
+    m_splits=None,
 ):
-
     reset_rng_states()
     if fp8:
         FP8GlobalStateManager.reset()
@@ -170,7 +194,7 @@ def _test_grouped_linear_accuracy(
 
     loss = out.sum()
     loss.backward()
-    
+
     if delay_wgrad_compute:
         if isinstance(block, GroupedLinear):
             block.backward_dw()
@@ -189,14 +213,13 @@ def _test_grouped_linear_accuracy(
                 outputs.append(p.grad)
     return outputs
 
+
 def run_sequential(sequential, inputs, m_splits):
     out = torch.cat(
-                [
-                    sequential[i](inp)
-                    for i, inp in enumerate(torch.split(inputs, m_splits.tolist()))
-                ]
-            )
+        [sequential[i](inp) for i, inp in enumerate(torch.split(inputs, m_splits.tolist()))]
+    )
     return out
+
 
 # Notes:
 # see /home/jeromeku/transformerengine/transformer_engine/pytorch/module/base.py reset_parameters
@@ -221,7 +244,7 @@ def test_grouped_linear_accuracy(
     parallel_mode=None,
 ):
     fp8 = recipe is not None
-  
+
     config = model_configs[model]
 
     with fp8_model_init(enabled=fp8 and fp8_model_params, recipe=recipe):
@@ -236,7 +259,7 @@ def test_grouped_linear_accuracy(
             fuse_wgrad_accumulation=fuse_wgrad_accumulation,
             delay_wgrad_compute=delay_wgrad_compute,
         ).eval()
-    
+
         sequential_linear = torch.nn.ModuleList(
             [
                 Linear(
@@ -287,7 +310,7 @@ def test_grouped_linear_accuracy(
         fuse_wgrad_accumulation,
         delay_wgrad_compute,
         inp_hidden_states=inp_hidden_states,
-        m_splits=m_splits
+        m_splits=m_splits,
     )
     outputs = _test_grouped_linear_accuracy(
         grouped_linear,
@@ -300,7 +323,7 @@ def test_grouped_linear_accuracy(
         fuse_wgrad_accumulation,
         delay_wgrad_compute,
         inp_hidden_states=inp_hidden_states,
-        m_splits=m_splits
+        m_splits=m_splits,
     )
     out = grouped_linear(inp_hidden_states, m_sizes)
     seq_out = run_sequential(sequential_linear, inp_hidden_states, m_splits)
@@ -314,16 +337,90 @@ def test_grouped_linear_accuracy(
     print(f"grouped vs seq diff: {diff.item():.4f}")
     diff = (seq_out - seq_ref_out).abs().max()
     print(f"seq ref vs seq diff: {diff.item():.4f}")
-    
+
     # Should be bit-wise match
     for i, (o, o_ref) in enumerate(zip(outputs, outputs_ref)):
         torch.testing.assert_close(o, o_ref, rtol=0, atol=0)
 
+
+def bench_grouped_linear(
+    dtype=torch.float32,
+    num_gemms=4,
+    bias=False,
+    bs=1,
+    seqlen=1024,
+    hidden_size=768,
+    parallel_mode=None,
+):
+    from triton.testing import do_bench
+
+    hidden_size = 768
+    grouped_linear = GroupedLinear(
+        num_gemms,
+        hidden_size,
+        4 * hidden_size,
+        bias=bias,
+        params_dtype=dtype,
+        parallel_mode=parallel_mode,
+        device="cuda",
+        fuse_wgrad_accumulation=False,
+        delay_wgrad_compute=False,
+    ).eval()
+
+    sequential_linear = torch.nn.ModuleList(
+        [
+            Linear(
+                hidden_size,
+                4 * hidden_size,
+                bias=bias,
+                params_dtype=dtype,
+                parallel_mode=parallel_mode,
+                device="cuda",
+                fuse_wgrad_accumulation=False,
+            ).eval()
+            for _ in range(num_gemms)
+        ]
+    )
+
+    # Share params
+    with torch.no_grad():
+        for i in range(num_gemms):
+            sequential_linear[i].weight = Parameter(getattr(grouped_linear, f"weight{i}").clone())
+            if bias:
+                sequential_linear[i].bias = Parameter(getattr(grouped_linear, f"bias{i}").clone())
+
+    inp_hidden_states = torch.randn(
+        (seqlen, bs, hidden_size),
+        dtype=dtype,
+        device="cuda",
+        requires_grad=True,
+    )
+    inp_hidden_states.retain_grad()
+
+    m_sizes = get_split_sizes(num_gemms, seqlen, split_size=1)
+    print(f"{m_sizes=}")
+    m_splits = m_sizes
+    m_sizes = m_sizes.tolist()
+
+    out = grouped_linear(inp_hidden_states, m_sizes)
+    seq_out = run_sequential(sequential_linear, inp_hidden_states, m_splits)
+    assert out.allclose(seq_out)
+    
+    def run_grouped_linear(grouped_linear, inputs: torch.Tensor, m_splits: torch.Tensor):
+        return grouped_linear(inputs, m_splits.tolist())
+    
+    g_time = do_bench(lambda: run_grouped_linear(grouped_linear, inp_hidden_states, m_splits))
+    s_time = do_bench(lambda: run_sequential(sequential_linear, inp_hidden_states, m_splits))
+    print(f"{g_time:.4f}ms | {s_time:.4f}ms: {s_time / g_time:.1f}x")
+
 if __name__ == "__main__":
     dtype = torch.float32
     num_gemms = 4
-    batch_size = 1
-    test_grouped_linear_accuracy(dtype=dtype, num_gemms=num_gemms, bs=batch_size)
+    bs = 1
+    seqlen = 1024
+    hidden_size = 768
+    # test_grouped_linear_accuracy(dtype=dtype, num_gemms=num_gemms, bs=batch_size)
+    bench_grouped_linear(dtype=dtype,num_gemms=num_gemms, bs=bs, seqlen=seqlen, hidden_size=hidden_size)
 
 # @pytest.mark.parametrize("recipe", fp8_recipes + [None])
 # def test_grouped_linear_accuracy_single_gemm(recipe):
