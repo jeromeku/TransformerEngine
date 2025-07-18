@@ -77,6 +77,6 @@ def main(layout="NN"):
     
     C = out[0]
     diff = (Cref - C).abs().max()
-    print(f"{diff.item():.4f}")
-
-main("TN")
+    print(f"{layout}: {diff.item():.4f}")
+for layout in ["NN", "TN"]:
+    main(layout)
