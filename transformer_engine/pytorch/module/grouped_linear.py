@@ -81,7 +81,7 @@ class _GroupedLinear(torch.autograd.Function):
         *weights_and_biases,
     ) -> torch.Tensor:
         # pylint: disable=missing-function-docstring
-        breakpoint()
+
         num_gemms = len(m_splits)
         weights = weights_and_biases[:num_gemms]
         biases = weights_and_biases[num_gemms:]
@@ -547,7 +547,7 @@ class GroupedLinear(TransformerEngineBaseModule):
 
         self.wgrad_store = WeightGradStore(delay_wgrad_compute)
 
-        breakpoint()
+
         self._offsets = {"input": 0, "weight": 1, "output": 2, "grad_output": 0, "grad_input": 1}
         self._num_fp8_tensors_per_gemm = {
             "fwd": 3,
