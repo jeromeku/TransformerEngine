@@ -11,4 +11,5 @@ See /home/jeromeku/transformerengine/transformer_engine/common/comm_gemm_overlap
 Additional refs:
 https://zhuanlan.zhihu.com/p/16594218518
 https://blog.csdn.net/qq_27590277/article/details/144938140
-
+https://developer.nvidia.com/blog/introducing-low-level-gpu-virtual-memory-management/#operating_system_native_interprocess_communication
+https://bruce-lee-ly.medium.com/nvidia-gpu-virtual-memory-management-7fdc4122226b
