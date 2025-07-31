@@ -19,6 +19,14 @@ namespace normalization {
 template <typename Ktraits>
 __global__ __launch_bounds__(Ktraits::THREADS_PER_CTA) void rmsnorm_fwd_tuned_kernel(
     ForwardKernelParams params) {
+  
+  #if defined(TE_DEBUG)          // or   #ifdef TE_DEBUG
+  if (threadIdx.x == 0) {
+      // Always finish device-side printf with '\n' so the line flushes
+      printf("DEBUG::%s:%d::rmsnorm_fwd_tuned_kernel\n", __FILE__, __LINE__);
+  }
+  #endif
+
   enum { ROWS_PER_CTA = Ktraits::ROWS_PER_CTA };
   enum { WARPS_N = Ktraits::WARPS_N };
   enum { WARPS_M = Ktraits::WARPS_M };
@@ -105,12 +113,13 @@ __global__ __launch_bounds__(Ktraits::THREADS_PER_CTA) void rmsnorm_fwd_tuned_ke
     for (int it = 0; it < LDGS; it++) {
 #pragma unroll
       for (int jt = 0; jt < NUM_ELTS; jt++) {
-        compute_t y_ij = rs * (xf[it * NUM_ELTS + jt]);
-        compute_t g_ij = gamma[it].data.elt[jt];
+        compute_t y_ij = rs * (xf[it * NUM_ELTS + jt]); // xf = float(hidden_states), rs = rsqrt 
+        compute_t g_ij = gamma[it].data.elt[jt]; // gamma = weight
         if (params.zero_centered_gamma) {
           g_ij += 1;
         }
-        compute_t temp_output = g_ij * y_ij;
+
+        weight_t temp_output = weight_t(g_ij) * weight_t(y_ij);
 
         if (params.fp8_out) {
           __builtin_assume(amax >= 0);
@@ -144,6 +153,14 @@ __global__ __launch_bounds__(Ktraits::THREADS_PER_CTA) void rmsnorm_fwd_tuned_ke
 template <typename Ktraits>
 __global__ __launch_bounds__(Ktraits::THREADS_PER_CTA) void rmsnorm_fwd_general_kernel(
     ForwardKernelParams params) {
+  
+  #if defined(TE_DEBUG)          // or   #ifdef TE_DEBUG
+  if (threadIdx.x == 0) {
+      // Always finish device-side printf with '\n' so the line flushes
+      printf("DEBUG::%s:%d::rmsnorm_fwd_general_kernel\n", __FILE__, __LINE__);
+  }
+  #endif
+
   enum { LDGS = Ktraits::LDGS };
   enum { NUM_ELTS = Ktraits::NUM_ELTS };
   enum { WARPS_M = Ktraits::WARPS_M };

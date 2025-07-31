@@ -157,7 +157,9 @@ function(make_string_header_from_file file_ STRING_NAME)
 endfunction()
 
 # Header files with C++ strings
-list(GET CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES 0 cuda_include_path)
+#list(GET CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES 0 cuda_include_path)
+
+list(GET CUDAToolkit_INCLUDE_DIRS 0 cuda_include_path)
 make_string_header("${cuda_include_path}"
                    string_path_cuda_include)
 make_string_header_from_file(transpose/rtc/cast_transpose_fusion.cu
