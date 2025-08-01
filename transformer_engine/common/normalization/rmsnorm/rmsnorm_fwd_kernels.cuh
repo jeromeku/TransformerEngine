@@ -67,11 +67,15 @@ __global__ __launch_bounds__(Ktraits::THREADS_PER_CTA) void rmsnorm_fwd_tuned_ke
   enum { NUM_ELTS = Ktraits::NUM_ELTS };
   enum { CTAS_PER_ROW = Ktraits::CTAS_PER_ROW };
 
+  // using weight_t = typename Ktraits::weight_t;
   using output_t = typename Ktraits::output_t;
   using index_t = typename Ktraits::index_t;
   using compute_t = typename Ktraits::compute_t;
-  constexpr bool both_bf16 = std::is_same_v<weight_t, bf16> && std::is_same_v<output_t, bf16>;
+
+  // In tuned kernel, output_t always same as weight_t
+  constexpr bool both_bf16 = std::is_same_v<output_t, bf16>;  // std::is_same_v<weight_t, bf16> &&
   constexpr bool check_condition = both_bf16 && std::is_same_v<compute_t, fp32>;
+
   if (check_condition && threadIdx.x == 0) {
     printf("TE_DEBUG::%s:%d::tuned_kernel::CONDITION_TRIGGERED\n", __FILE__, __LINE__);
   }
@@ -161,7 +165,7 @@ __global__ __launch_bounds__(Ktraits::THREADS_PER_CTA) void rmsnorm_fwd_tuned_ke
           output_t y_o = cast_from_float<output_t>(y_ij);
 
           // Perform multiplication in original dtype
-          output_t temp_output_ = g_o * y_o;
+          output_t temp_output = g_o * y_o;
 
           // No need for additional recast
           z[it].data.elt[jt] = temp_output;
@@ -226,7 +230,7 @@ __global__ __launch_bounds__(Ktraits::THREADS_PER_CTA) void rmsnorm_fwd_general_
 
   constexpr bool both_bf16 = std::is_same_v<weight_t, bf16> && std::is_same_v<output_t, bf16>;
   constexpr bool check_condition = both_bf16 && std::is_same_v<compute_t, fp32>;
-  
+
   if (check_condition && threadIdx.x == 0) {
     printf("TE_DEBUG::%s:%d::general_kernel::CONDITION_TRIGGERED\n", __FILE__, __LINE__);
   }
@@ -314,7 +318,25 @@ __global__ __launch_bounds__(Ktraits::THREADS_PER_CTA) void rmsnorm_fwd_general_
     for (int it = 0, col = gidn * NUM_ELTS; it < LDGS && row < params.rows && col < params.cols;
          it++, col += gdimn * NUM_ELTS) {
       // Compute output values
-      if (!check_condition) {
+      if constexpr(check_condition) {
+        Ovec z;
+#pragma unroll
+        for (int jt = 0; jt < NUM_ELTS; jt++) {
+          compute_t y_ij = rs * (x[it].data.elt[jt]);
+          compute_t g_ij = gamma[it].data.elt[jt];
+          if (params.zero_centered_gamma) {
+            g_ij += 1;
+          }
+          // Cast from fp32 -> original type
+          output_t g_o = cast_from_float<output_t>(g_ij);
+          output_t y_o = cast_from_float<output_t>(y_ij);
+
+          // Perform multiplication in original dtype
+          z.data.elt[jt] = g_o * y_o;
+        }
+
+        z.store_to_elts(params.z, row * params.cols + col, params.cols - col);
+      } else {
         Cvec z;
 #pragma unroll
         for (int jt = 0; jt < NUM_ELTS; jt++) {
@@ -343,24 +365,6 @@ __global__ __launch_bounds__(Ktraits::THREADS_PER_CTA) void rmsnorm_fwd_general_
         Ovec z_out;
         z.to(z_out);
         z_out.store_to_elts(params.z, row * params.cols + col, params.cols - col);
-      } else {
-        Ovec z;
-#pragma unroll
-        for (int jt = 0; jt < NUM_ELTS; jt++) {
-          compute_t y_ij = rs * (x[it].data.elt[jt]);
-          compute_t g_ij = gamma[it].data.elt[jt];
-          if (params.zero_centered_gamma) {
-            g_ij += 1;
-          }
-          // Cast from fp32 -> original type
-          output_t g_o = cast_from_float<output_t>(g_ij);
-          output_t y_o = cast_from_float<output_t>(y_ij);
-
-          // Perform multiplication in original dtype
-          z.data.elt[jt] = g_o * y_o;
-        }
-
-        z.store_to_elts(params.z, row * params.cols + col, params.cols - col);
       }
     }
   }
