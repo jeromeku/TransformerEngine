@@ -9,6 +9,7 @@
 
 #include <cfloat>
 #include <cstdio>
+#include <type_traits>
 
 #include "../../utils.cuh"
 #include "../common.h"
@@ -16,16 +17,45 @@
 namespace transformer_engine {
 namespace normalization {
 
+template <typename T>  // generic version: keep FP32
+__host__ __device__ inline T cast_from_float(fp32 v) {
+  return v;
+}
+
+template <>  // FP16
+__host__ __device__ inline fp16 cast_from_float<__half>(fp32 v) {
+  return __float2half_rn(v);  // round-to-nearest-even
+}
+
+template <>  // BF16
+__host__ __device__ inline bf16 cast_from_float<bf16>(fp32 v) {
+  return __float2bfloat16_rn(v);  // RTNE  :contentReference[oaicite:0]{index=0}
+}
+
+template <typename T>  // generic version: keep FP32
+__host__ __device__ inline float cast_to_float(T v) {
+  return v;
+}
+
+template <>  // BF16
+__host__ __device__ inline float cast_to_float<__nv_bfloat16>(__nv_bfloat16 v) {
+  return __bfloat162float(v);  // RTNE  :contentReference[oaicite:0]{index=0}
+}
+
+template <>  // FP16
+__host__ __device__ inline float cast_to_float<__half>(__half v) {
+  return __half2float(v);  // round-to-nearest-even
+}
+
 template <typename Ktraits>
 __global__ __launch_bounds__(Ktraits::THREADS_PER_CTA) void rmsnorm_fwd_tuned_kernel(
     ForwardKernelParams params) {
-  
-  #if defined(TE_DEBUG)          // or   #ifdef TE_DEBUG
+#if defined(TE_DEBUG)  // or   #ifdef TE_DEBUG
   if (threadIdx.x == 0) {
-      // Always finish device-side printf with '\n' so the line flushes
-      printf("DEBUG::%s:%d::rmsnorm_fwd_tuned_kernel\n", __FILE__, __LINE__);
+    // Always finish device-side printf with '\n' so the line flushes
+    printf("DEBUG::%s:%d::rmsnorm_fwd_tuned_kernel\n", __FILE__, __LINE__);
   }
-  #endif
+#endif
 
   enum { ROWS_PER_CTA = Ktraits::ROWS_PER_CTA };
   enum { WARPS_N = Ktraits::WARPS_N };
@@ -40,6 +70,12 @@ __global__ __launch_bounds__(Ktraits::THREADS_PER_CTA) void rmsnorm_fwd_tuned_ke
   using output_t = typename Ktraits::output_t;
   using index_t = typename Ktraits::index_t;
   using compute_t = typename Ktraits::compute_t;
+  constexpr bool both_bf16 = std::is_same_v<weight_t, bf16> && std::is_same_v<output_t, bf16>;
+  constexpr bool check_condition = both_bf16 && std::is_same_v<compute_t, fp32>;
+  if (check_condition && threadIdx.x == 0) {
+    printf("TE_DEBUG::%s:%d::tuned_kernel::CONDITION_TRIGGERED\n", __FILE__, __LINE__);
+  }
+
   using Ivec = typename Ktraits::Ivec;
   using Ovec = typename Ktraits::Ovec;
   using Wvec = typename Ktraits::Wvec;
@@ -113,21 +149,34 @@ __global__ __launch_bounds__(Ktraits::THREADS_PER_CTA) void rmsnorm_fwd_tuned_ke
     for (int it = 0; it < LDGS; it++) {
 #pragma unroll
       for (int jt = 0; jt < NUM_ELTS; jt++) {
-        compute_t y_ij = rs * (xf[it * NUM_ELTS + jt]); // xf = float(hidden_states), rs = rsqrt 
-        compute_t g_ij = gamma[it].data.elt[jt]; // gamma = weight
+        compute_t y_ij = rs * (xf[it * NUM_ELTS + jt]);  // xf = float(hidden_states), rs = rsqrt
+        compute_t g_ij = gamma[it].data.elt[jt];         // gamma = weight
         if (params.zero_centered_gamma) {
           g_ij += 1;
         }
 
-        weight_t temp_output = weight_t(g_ij) * weight_t(y_ij);
+        if constexpr (check_condition) {
+          // Cast from fp32 -> original type
+          output_t g_o = cast_from_float<output_t>(g_ij);
+          output_t y_o = cast_from_float<output_t>(y_ij);
 
-        if (params.fp8_out) {
-          __builtin_assume(amax >= 0);
-          amax = fmaxf(amax, fabsf(temp_output));
-          temp_output = temp_output * scale;
+          // Perform multiplication in original dtype
+          output_t temp_output_ = g_o * y_o;
+
+          // No need for additional recast
+          z[it].data.elt[jt] = temp_output;
+
+        } else {
+          compute_t temp_output = g_ij * y_ij;
+
+          if (params.fp8_out) {
+            __builtin_assume(amax >= 0);
+            amax = fmaxf(amax, fabsf(temp_output));
+            temp_output = temp_output * scale;
+          }
+
+          z[it].data.elt[jt] = output_t(temp_output);
         }
-
-        z[it].data.elt[jt] = output_t(temp_output);
       }
       z[it].store_to(params.z, idx);
       idx += VEC_COLS_PER_LDG;
@@ -153,13 +202,12 @@ __global__ __launch_bounds__(Ktraits::THREADS_PER_CTA) void rmsnorm_fwd_tuned_ke
 template <typename Ktraits>
 __global__ __launch_bounds__(Ktraits::THREADS_PER_CTA) void rmsnorm_fwd_general_kernel(
     ForwardKernelParams params) {
-  
-  #if defined(TE_DEBUG)          // or   #ifdef TE_DEBUG
+#if defined(TE_DEBUG)  // or   #ifdef TE_DEBUG
   if (threadIdx.x == 0) {
-      // Always finish device-side printf with '\n' so the line flushes
-      printf("DEBUG::%s:%d::rmsnorm_fwd_general_kernel\n", __FILE__, __LINE__);
+    // Always finish device-side printf with '\n' so the line flushes
+    printf("DEBUG::%s:%d::rmsnorm_fwd_general_kernel\n", __FILE__, __LINE__);
   }
-  #endif
+#endif
 
   enum { LDGS = Ktraits::LDGS };
   enum { NUM_ELTS = Ktraits::NUM_ELTS };
@@ -175,6 +223,13 @@ __global__ __launch_bounds__(Ktraits::THREADS_PER_CTA) void rmsnorm_fwd_general_
   using Ovec = typename Ktraits::Ovec;
   using Wvec = typename Ktraits::Wvec;
   using Cvec = typename Ktraits::Cvec;
+
+  constexpr bool both_bf16 = std::is_same_v<weight_t, bf16> && std::is_same_v<output_t, bf16>;
+  constexpr bool check_condition = both_bf16 && std::is_same_v<compute_t, fp32>;
+  
+  if (check_condition && threadIdx.x == 0) {
+    printf("TE_DEBUG::%s:%d::general_kernel::CONDITION_TRIGGERED\n", __FILE__, __LINE__);
+  }
 
   const index_t tidx = threadIdx.x;
   const index_t lane = tidx % THREADS_PER_WARP;
@@ -259,34 +314,54 @@ __global__ __launch_bounds__(Ktraits::THREADS_PER_CTA) void rmsnorm_fwd_general_
     for (int it = 0, col = gidn * NUM_ELTS; it < LDGS && row < params.rows && col < params.cols;
          it++, col += gdimn * NUM_ELTS) {
       // Compute output values
-      Cvec z;
-#pragma unroll
-      for (int jt = 0; jt < NUM_ELTS; jt++) {
-        compute_t y_ij = rs * (x[it].data.elt[jt]);
-        compute_t g_ij = gamma[it].data.elt[jt];
-        if (params.zero_centered_gamma) {
-          g_ij += 1;
-        }
-        z.data.elt[jt] = g_ij * y_ij;
-      }
-
-      // Apply fp8 factors
-      if (params.fp8_out) {
+      if (!check_condition) {
+        Cvec z;
 #pragma unroll
         for (int jt = 0; jt < NUM_ELTS; jt++) {
-          if (col + jt < params.cols) {
-            compute_t z_ij = z.data.elt[jt];
-            __builtin_assume(amax >= 0);
-            amax = fmaxf(amax, fabsf(z_ij));
-            z.data.elt[jt] = z_ij * scale;
+          compute_t y_ij = rs * (x[it].data.elt[jt]);
+          compute_t g_ij = gamma[it].data.elt[jt];
+          if (params.zero_centered_gamma) {
+            g_ij += 1;
+          }
+          z.data.elt[jt] = g_ij * y_ij;
+        }
+
+        // Apply fp8 factors
+        if (params.fp8_out) {
+#pragma unroll
+          for (int jt = 0; jt < NUM_ELTS; jt++) {
+            if (col + jt < params.cols) {
+              compute_t z_ij = z.data.elt[jt];
+              __builtin_assume(amax >= 0);
+              amax = fmaxf(amax, fabsf(z_ij));
+              z.data.elt[jt] = z_ij * scale;
+            }
           }
         }
-      }
 
-      // Store output
-      Ovec z_out;
-      z.to(z_out);
-      z_out.store_to_elts(params.z, row * params.cols + col, params.cols - col);
+        // Store output
+        Ovec z_out;
+        z.to(z_out);
+        z_out.store_to_elts(params.z, row * params.cols + col, params.cols - col);
+      } else {
+        Ovec z;
+#pragma unroll
+        for (int jt = 0; jt < NUM_ELTS; jt++) {
+          compute_t y_ij = rs * (x[it].data.elt[jt]);
+          compute_t g_ij = gamma[it].data.elt[jt];
+          if (params.zero_centered_gamma) {
+            g_ij += 1;
+          }
+          // Cast from fp32 -> original type
+          output_t g_o = cast_from_float<output_t>(g_ij);
+          output_t y_o = cast_from_float<output_t>(y_ij);
+
+          // Perform multiplication in original dtype
+          z.data.elt[jt] = g_o * y_o;
+        }
+
+        z.store_to_elts(params.z, row * params.cols + col, params.cols - col);
+      }
     }
   }
 
