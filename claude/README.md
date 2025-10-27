@@ -1,268 +1,417 @@
-# TransformerEngine Architecture Documentation
+# TransformerEngine te.autocast() Analysis - Complete Documentation
 
-> **Comprehensive documentation of TransformerEngine's low-precision quantization system (MXFP8, NVFP4, Blockwise FP8)**
->
-> Generated for: Internal developer reference, debugging, and extension
->
-> Date: 2025
->
-> Base Commit: bd55e7ba
+This folder contains comprehensive documentation analyzing the `te.autocast()` implementation in TransformerEngine, with detailed focus on NVFP4BlockScaling recipe integration.
 
----
+## Contents
 
-## Documentation Structure
+### 1. TE_AUTOCAST_ANALYSIS.md
+**Comprehensive architecture and implementation analysis**
 
-This directory contains comprehensive architecture documentation for TransformerEngine's mixed-precision training system, with a focus on low-precision formats (FP8, MXFP8, NVFP4).
+Primary document covering:
+- Architecture overview with data flow diagrams
+- Core components and file structure
+- Complete autocast() context manager implementation
+- NVFP4BlockScaling recipe definition and integration
+- Global state management via FP8GlobalStateManager
+- Complete call flow from user API to kernel execution
+- Integration with te.Linear module
+- Support checks and device capability validation
+- Key design patterns used
 
-### 📄 Files
+**Key Sections:**
+- `autocast()` context manager (lines 789-852 in quantization.py)
+- FP8GlobalStateManager state management (lines 224-252)
+- NVFP4BlockScalingRecipeState factory (lines 1270-1343)
+- Recipe support validation and device checks
 
-1. **[ARCHITECTURE.md](ARCHITECTURE.md)** (95KB+)
-   - Complete system architecture overview
-   - Layer-by-layer breakdown (Python → C++ → CUDA)
-   - Detailed implementation guides for MXFP8, NVFP4, and Blockwise FP8
-   - Kernel implementation details and optimizations
-   - Distributed training integration (FSDP, TP, SP, etc.)
-   - **Use when**: Understanding overall system design or tracing call paths
-
-2. **[test_nvfp4_walkthrough.md](test_nvfp4_walkthrough.md)** (55KB+)
-   - Line-by-line walkthrough of NVFP4 GEMM tests
-   - Complete call stack traces from Python to GPU
-   - Inline code snippets with source links
-   - Demonstrates: 2-level scaling, RHT, stochastic rounding
-   - **Use when**: Understanding NVFP4 implementation or debugging FP4 issues
-
-3. **[test_blockwise_fp8_walkthrough.md](test_blockwise_fp8_walkthrough.md)** (48KB+)
-   - Line-by-line walkthrough of blockwise FP8 GEMM tests
-   - 1D and 2D block quantization explained
-   - Mixed quantization strategies (1D×2D, 1D×1D, 2D×1D)
-   - GEMM_READY vs COMPACT data formats
-   - **Use when**: Understanding blockwise FP8 or implementing custom recipes
+**Best For:** Understanding the overall architecture, design patterns, and how different components interact.
 
 ---
 
-## Quick Navigation
+### 2. NVFP4_TEST_WALKTHROUGH.md
+**Detailed test case walkthroughs with data flow traces**
 
-### By Topic
+Test-focused documentation containing:
+- Test file organization and structure
+- Basic module test walkthrough with complete call paths
+- RHT (Random Hadamard Transform) quantization data flow
+- 2D quantization for weights explanation
+- GEMM kernel execution path and computational flow
+- Test validation mechanisms and tolerance rationale
+- Environment variable controls
+- Forward and backward pass specifications
 
-| Topic | Primary Document | Section |
-|-------|------------------|---------|
-| **System Overview** | [ARCHITECTURE.md](ARCHITECTURE.md) | [System Overview](ARCHITECTURE.md#system-overview) |
-| **MXFP8 Implementation** | [ARCHITECTURE.md](ARCHITECTURE.md) | [MXFP8 Deep Dive](ARCHITECTURE.md#mxfp8-implementation-deep-dive) |
-| **NVFP4 Implementation** | [ARCHITECTURE.md](ARCHITECTURE.md) | [NVFP4 Deep Dive](ARCHITECTURE.md#nvfp4-implementation-deep-dive) |
-| **Blockwise FP8** | [ARCHITECTURE.md](ARCHITECTURE.md) | [Blockwise FP8](ARCHITECTURE.md#blockwise-fp8-implementation) |
-| **Distributed Training** | [ARCHITECTURE.md](ARCHITECTURE.md) | [Distributed Integration](ARCHITECTURE.md#distributed-training-integration) |
-| **NVFP4 Testing** | [test_nvfp4_walkthrough.md](test_nvfp4_walkthrough.md) | Full document |
-| **Blockwise Testing** | [test_blockwise_fp8_walkthrough.md](test_blockwise_fp8_walkthrough.md) | Full document |
-| **Kernel Details** | [ARCHITECTURE.md](ARCHITECTURE.md) | [Kernel Implementation](ARCHITECTURE.md#kernel-implementation-details) |
+**Test Files Covered:**
+- `test_nvfp4_module_exact.py` - Main module test
+- `test_nvfp4_gemm_exact.py` - Direct GEMM tests
+- `test_nvfp4_rht_quantize_exact.py` - RHT-specific tests
+- `test_nvfp4_quantize_exact.py` - Quantization kernel tests
+- `test_nvfp4_sr_quantize.py` - Stochastic rounding tests
 
-### By Use Case
-
-| Use Case | Recommended Reading |
-|----------|---------------------|
-| **New to TransformerEngine** | Start with [ARCHITECTURE.md § Executive Summary](ARCHITECTURE.md#executive-summary) |
-| **Debugging quantization issues** | [ARCHITECTURE.md § Quantization Formats](ARCHITECTURE.md#quantization-formats) + relevant walkthrough |
-| **Implementing custom recipe** | [ARCHITECTURE.md § Recipe System](ARCHITECTURE.md#architecture-layers) + [Blockwise walkthrough](test_blockwise_fp8_walkthrough.md) |
-| **Optimizing kernels** | [ARCHITECTURE.md § Kernel Details](ARCHITECTURE.md#kernel-implementation-details) |
-| **Understanding GEMM** | [NVFP4 walkthrough § Step 8](test_nvfp4_walkthrough.md#step-8-native-te-cublas-gemm) or [Blockwise § Step 5](test_blockwise_fp8_walkthrough.md#step-5-native-cublas-gemm) |
-| **Distributed training integration** | [ARCHITECTURE.md § Distributed Training](ARCHITECTURE.md#distributed-training-integration) |
-| **Adding new quantization format** | Read all three docs, focus on quantizer pattern in [ARCHITECTURE.md § Layer 3](ARCHITECTURE.md#layer-3-quantizer-classes) |
+**Best For:** Understanding test execution, data flow during testing, and tracing specific features like RHT and 2D quantization.
 
 ---
 
-## Key Concepts Covered
+## Key Files Referenced
 
-### Quantization Formats
+### Core Implementation Files
 
-| Format | Docs Coverage | Key Characteristics |
-|--------|---------------|---------------------|
-| **MXFP8** | [ARCHITECTURE.md](ARCHITECTURE.md#mxfp8-microscaled-fp8) | 32-element blocks, E8M0 scales, dual layouts |
-| **NVFP4** | [ARCHITECTURE.md](ARCHITECTURE.md#nvfp4-4-bit-floating-point) + [Walkthrough](test_nvfp4_walkthrough.md) | 16-element blocks, 2-level scaling (E4M3+FP32), RHT, SR |
-| **Blockwise FP8** | [ARCHITECTURE.md](ARCHITECTURE.md#blockwise-fp8) + [Walkthrough](test_blockwise_fp8_walkthrough.md) | Configurable 1D/2D blocks, FP32 scales, GEMM_READY/COMPACT |
-| **Standard FP8** | [ARCHITECTURE.md § Delayed Scaling](ARCHITECTURE.md#quantization-formats) | Per-tensor scales, delayed/current strategies |
+1. **transformer_engine/pytorch/quantization.py** (1397 lines)
+   - `autocast()` context manager (lines 789-852)
+   - `FP8GlobalStateManager` class (lines 224-677)
+   - `RecipeState` factory (lines 967-1026)
+   - `NVFP4BlockScalingRecipeState` class (lines 1270-1343)
 
-### System Architecture
+2. **transformer_engine/common/recipe/__init__.py** (515 lines)
+   - `NVFP4BlockScaling` recipe definition (lines 386-481)
+   - `Format` enum (lines 23-44)
+   - `QParams` dataclass (lines 62-83)
 
-**5-Layer Architecture** (detailed in [ARCHITECTURE.md](ARCHITECTURE.md#architecture-layers)):
-1. **Python API Layer**: `te.autocast()`, `te.Linear`, etc.
-2. **Quantized Tensor Classes**: `MXFP8Tensor`, `NVFP4Tensor`, `Float8BlockwiseQTensor`
-3. **Quantizer Classes**: Builder pattern for configuration
-4. **C++ Binding Layer**: PyBind11 interface
-5. **CUDA Kernel Layer**: Device code for quantization/GEMM
+3. **transformer_engine/pytorch/module/linear.py**
+   - `_Linear` autograd.Function
+   - Forward/backward pass integration with quantization
 
-### Call Path Examples
+### Test Files
 
-**MXFP8 End-to-End**:
+Located in: `/home/jeromeku/transformerengine/tests/pytorch/nvfp4/`
+
+- `test_nvfp4_module_exact.py` (20,469 bytes)
+- `test_nvfp4_gemm_exact.py` (7,745 bytes)
+- `test_nvfp4_quantize_exact.py` (16,307 bytes)
+- `test_nvfp4_rht_quantize_exact.py` (8,033 bytes)
+- `test_nvfp4_sr_quantize.py` (7,968 bytes)
+
+---
+
+## Quick Reference: Autocast Usage Pattern
+
+### Basic Usage
+
+```python
+import transformer_engine.pytorch as te
+from transformer_engine.common.recipe import NVFP4BlockScaling
+
+# Create recipe
+recipe = NVFP4BlockScaling()
+
+# Use in autocast context
+with te.autocast(enabled=True, recipe=recipe):
+    output = model(input)
+    loss = criterion(output, target)
+    loss.backward()
 ```
-User: te.Linear(inp)  [ARCHITECTURE.md § MXFP8 Complete Call Path]
-  ↓ Python: mxfp8_tensor.py
-  ↓ C++: pybind.cpp → quantize()
-  ↓ CUDA: fp8_block_scaling.cu → mxfp8_quantize_kernel()
-  ↓ cuBLAS: cublasLtMatmul() with E8M0 scales
-  ↓ GPU: Blackwell Tensor Cores
-```
 
-**NVFP4 with RHT**:
-```
-User: quantizer.quantize(grad)  [test_nvfp4_walkthrough.md § Step 4]
-  ↓ Python: nvfp4_tensor.py → update_quantized()
-  ↓ C++: pybind.cpp → quantize()
-  ↓ CUDA: nvfp4.cu → nvfp4_quantize_rht_kernel()
-      1. Apply 16×16 Hadamard transform
-      2. Compute amax on transformed data
-      3. Quantize to FP4 with 2-level scaling
-  ↓ Result: NVFP4Tensor with smoothed distribution
-```
+### Data Flow Summary
 
-**Blockwise FP8 (1D×2D)**:
 ```
-User: tex.generic_gemm(w_2d, x_1d)  [test_blockwise_fp8_walkthrough.md § Step 5]
-  ↓ Python: tex.generic_gemm()
-  ↓ C++: gemm() → gemm_fp8_blockwise()
-  ↓ cuBLAS: Mixed 128×128 (weight) and 1×128 (activation) blocks
-  ↓ GPU: H100 Tensor Cores with per-block FP32 scales
+User Code
+├─ te.autocast(enabled=True, recipe=NVFP4BlockScaling())
+│  └─ FP8GlobalStateManager.autocast_enter()
+│
+├─ model(input)
+│  └─ te.Linear.forward()
+│     ├─ Query FP8GlobalStateManager.is_fp8_enabled() → True
+│     ├─ recipe = FP8GlobalStateManager.get_fp8_recipe()
+│     ├─ RecipeState.create(recipe, mode="forward")
+│     ├─ NVFP4BlockScalingRecipeState.make_quantizers()
+│     └─ _Linear.forward() with quantization
+│
+└─ autocast_exit()
+   └─ FP8GlobalStateManager.autocast_exit()
 ```
 
 ---
 
-## File Links and Line Numbers
+## Architecture Components
 
-All documents use **clickable VSCode-compatible links** with line numbers:
+### 1. Context Manager (`autocast()`)
+- **Purpose:** Enable/disable quantization context
+- **Entry:** Set FP8GlobalStateManager state
+- **Exit:** Restore previous state
+- **File:** quantization.py, lines 789-852
 
-**Format**: `[filename.py:123-456](path/to/filename.py#L123-L456)`
+### 2. Global State Manager
+- **Purpose:** Track active quantization recipe and configuration globally
+- **Class:** `FP8GlobalStateManager`
+- **State Variables:** FP8_ENABLED, FP8_RECIPE, AUTOCAST_DEPTH
+- **File:** quantization.py, lines 224-677
 
-**Examples**:
-- [mxfp8_tensor.py:179-449](../transformer_engine/pytorch/tensor/mxfp8_tensor.py#L179-L449)
-- [pybind.cpp:119](../transformer_engine/pytorch/csrc/extensions/pybind.cpp#L119)
-- [fp8_block_scaling.cu](../transformer_engine/common/recipe/fp8_block_scaling.cu)
+### 3. Recipe System
+- **Base Class:** `Recipe` (common/recipe/__init__.py)
+- **Implementations:** 
+  - NVFP4BlockScaling (for FP4)
+  - MXFP8BlockScaling (for MXFP8)
+  - DelayedScaling (for FP8 legacy)
+  - Float8CurrentScaling
+  - Float8BlockScaling
+- **Config:** QParams dataclass with quantization parameters
 
-**How to use**:
-1. Open any `.md` file in VSCode markdown preview (Ctrl+Shift+V / Cmd+Shift+V)
-2. Click on links to jump to source code
-3. Use "Go Back" (Alt+← / Ctrl+-) to return
+### 4. RecipeState Factory
+- **Purpose:** Create recipe-specific quantizer instances
+- **Pattern:** Abstract factory design
+- **Dispatch Logic:** recipe.nvfp4() → NVFP4BlockScalingRecipeState
+- **File:** quantization.py, lines 967-1026
 
----
-
-## Visual Aids
-
-All documents include:
-- **Tables**: Quick reference for formats, APIs, parameters
-- **Code Snippets**: Inline examples from actual source code
-- **Pseudo-code**: Simplified kernel implementations for clarity
-- **Call Stack Diagrams**: ASCII art flow diagrams
-
-**Example Table** (from ARCHITECTURE.md):
-
-| Format | Block Size | Scale Type | Hardware | Use Case |
-|--------|------------|------------|----------|----------|
-| MXFP8 | 32 | E8M0 | Blackwell+ | All tensors E4M3 |
-| NVFP4 | 16 (1D), 16×16 (2D) | E4M3+FP32 | Blackwell+ | Extreme compression |
-| Blockwise FP8 | 128 (1D), 128×128 (2D) | FP32 | H100+ | Configurable granularity |
-
----
-
-## Testing Coverage
-
-### NVFP4 Tests Documented
-
-From `tests/pytorch/nvfp4/`:
-- [test_nvfp4_gemm_exact.py](../tests/pytorch/nvfp4/test_nvfp4_gemm_exact.py) ✅ Fully documented in [test_nvfp4_walkthrough.md](test_nvfp4_walkthrough.md)
-- test_nvfp4_quantize_exact.py
-- test_nvfp4_sr_quantize.py (stochastic rounding)
-- test_nvfp4_rht_quantize_exact.py (RHT)
-- test_nvfp4_module_exact.py
-
-### Blockwise FP8 Tests Documented
-
-From `tests/pytorch/`:
-- [test_float8_blockwise_gemm_exact.py](../tests/pytorch/test_float8_blockwise_gemm_exact.py) ✅ Fully documented in [test_blockwise_fp8_walkthrough.md](test_blockwise_fp8_walkthrough.md)
-- test_float8_blockwise_scaling_exact.py
-- test_float8blockwisetensor.py
+### 5. Quantizers
+- **NVFP4Quantizer:** 4-bit quantization with 2-level block scaling
+- **Float8Quantizer:** 8-bit with delayed scaling
+- **MXFP8Quantizer:** 8-bit with MXFP8 block scaling
 
 ---
 
-## Development Workflow
+## NVFP4BlockScaling Details
 
-### Adding New Quantization Format
+### Recipe Configuration
 
-1. **Design**: Read [ARCHITECTURE.md § Quantizer Pattern](ARCHITECTURE.md#layer-3-quantizer-classes)
-2. **Implement Quantizer**: Follow `NVFP4Quantizer` as template
-3. **Implement Tensor**: Inherit from `QuantizedTensor` and storage class
-4. **Add C++ Binding**: Register in `pybind.cpp` (see [init_nvfp4_extensions](../transformer_engine/pytorch/csrc/extensions/pybind.cpp#L91-L104))
-5. **Implement Kernels**: See [Kernel Details](ARCHITECTURE.md#kernel-implementation-details)
-6. **Test**: Write tests following patterns in walkthroughs
+```python
+recipe.fp4_format = Format.E2M1
+recipe.fp8_format = Format.E4M3
 
-### Debugging Quantization Issues
+# Quantization modes (configurable via environment variables)
+recipe.fp4_quant_fwd_inp = QParams(
+    random_hadamard_transform=True,  # Enabled by default
+    stochastic_rounding=False,
+    fp4_2d_quantization=False,       # 1D blocks for input
+)
+recipe.fp4_quant_fwd_weight = QParams(
+    random_hadamard_transform=False,
+    stochastic_rounding=False,
+    fp4_2d_quantization=True,        # 2D 16x16 tiles for weights
+)
+recipe.fp4_quant_bwd_grad = QParams(
+    random_hadamard_transform=True,
+    stochastic_rounding=True,        # Enabled for gradients
+    fp4_2d_quantization=False,       # 1D blocks for gradients
+)
+```
 
-1. **Verify shapes**: Check [ARCHITECTURE.md § Memory Layouts](ARCHITECTURE.md#mxfp8-memory-layout-details)
-2. **Check scales**: Validate scale computation (see walkthroughs § Step 4)
-3. **Inspect data**: Use `tensor.dequantize()` to check values
-4. **Compare to reference**: Write test like [test_nvfp4_gemm_exact.py](../tests/pytorch/nvfp4/test_nvfp4_gemm_exact.py)
-5. **Trace call stack**: Follow call paths in ARCHITECTURE.md
+### Block Sizes
 
-### Optimizing Performance
+- **Forward Input:** 1D blocks of 16 consecutive values
+- **Forward Weight:** 2D blocks of 16x16 (with RHT and 2D quantization)
+- **Backward Gradient:** 1D blocks of 16 consecutive values with stochastic rounding
 
-1. **Profile**: Identify bottleneck (quantization vs GEMM vs communication)
-2. **Kernel optimization**: See [ARCHITECTURE.md § Common Kernel Patterns](ARCHITECTURE.md#common-kernel-patterns)
-3. **Layout optimization**: Consider COMPACT vs GEMM_READY ([Blockwise § GEMM_READY Format](test_blockwise_fp8_walkthrough.md#gemm_ready-vs-compact-formats))
-4. **Recipe tuning**: Experiment with 1D vs 2D blocks ([ARCHITECTURE.md § Recipe System](ARCHITECTURE.md#architecture-layers))
+### Scaling Strategy (2-Level)
 
----
+1. **Level 1 (Block Scales):** E4M3 format, one scale per block
+   - For 1D: K/16 scales for tensor of length K
+   - For 2D: (M/16) × (N/16) scales for M×N tensor
 
-## Related Resources
-
-### TransformerEngine Documentation
-- [Official Docs](https://docs.nvidia.com/deeplearning/transformer-engine/)
-- [FP8 Primer](../docs/examples/fp8_primer.ipynb) - Introductory notebook
-- [API Reference](https://docs.nvidia.com/deeplearning/transformer-engine/user-guide/api/pytorch.html)
-
-### Papers and Specs
-- **MXFP8**: [OCP Microscaling Formats Spec](https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf)
-- **NVFP4**: [Pretraining LLMs with NVFP4](https://arxiv.org/abs/2509.25149v1)
-- **Blockwise FP8**: [DeepSeek-v3 Paper](https://arxiv.org/abs/2412.19437v1)
-- **FP8 Training**: [FP8 Formats for Deep Learning](https://arxiv.org/abs/2209.05433)
-
-### Hardware References
-- **Blackwell Architecture**: NVIDIA Blackwell White Paper (search nvidia.com)
-- **Hopper Architecture**: NVIDIA H100 Tensor Core GPU Architecture White Paper
-- **cuBLASLt**: [cuBLAS Documentation](https://docs.nvidia.com/cuda/cublas/)
+2. **Level 2 (Global Scale):** FP32 format, one scale for entire tensor
 
 ---
 
-## Contributing
+## Quantization Pipeline
 
-When updating this documentation:
+### Forward Pass
 
-1. **Maintain link format**: Use VSCode-compatible links with line numbers
-2. **Update line numbers**: If source changes, verify line number references
-3. **Add inline code**: Include relevant code snippets for new features
-4. **Trace call stacks**: Document Python → C++ → CUDA paths
-5. **Test links**: Verify all links work in VSCode markdown preview
+```
+Input (BF16)
+├─ Apply RHT (if enabled)
+├─ Compute amax per block
+├─ Compute E4M3 block scales
+├─ Compute FP32 global scale
+├─ Quantize to FP4 E2M1
+└─ Return QuantizedTensor
+
+Weight (BF16)
+├─ Apply 2D tile quantization (if enabled)
+├─ Compute amax per tile
+├─ Compute E4M3 tile scales
+├─ Compute FP32 global scale
+├─ Quantize to FP4 E2M1
+└─ Return QuantizedTensor
+
+GEMM: FP4_input @ FP4_weight
+├─ In-kernel dequantization using scales
+├─ Tensor Core computation in FP32
+└─ Output (FP32 → cast to BF16)
+```
+
+### Backward Pass
+
+```
+grad_output (BF16)
+├─ Apply RHT (if enabled)
+├─ Apply stochastic rounding
+├─ Compute amax per block
+├─ Compute E4M3 block scales
+├─ Compute FP32 global scale
+├─ Quantize to FP4 E2M1
+└─ Return QuantizedTensor
+
+dgrad GEMM: grad_output @ weight.T
+└─ grad_input (FP32 → cast to BF16)
+
+wgrad GEMM: input.T @ grad_output
+└─ grad_weight (FP32 → cast to BF16)
+```
 
 ---
 
-## License
+## Device Requirements
 
-This documentation is part of TransformerEngine and follows the same license. See [../LICENSE](../LICENSE) for details.
+### Hardware Support
+
+- **NVFP4:** Blackwell architecture (compute capability 10.0+)
+- **FP8/MXFP8:** Ada (8.9+), Hopper (9.0+), Blackwell (10.0+)
+
+### Validation Function
+
+```python
+def check_nvfp4_support() -> Tuple[bool, str]:
+    if get_device_compute_capability() >= (10, 0):  # Blackwell+
+        return True, ""
+    return False, "Device compute capability 10.0+ required"
+```
 
 ---
 
-## Acknowledgments
+## Key Design Patterns
 
-**Generated by**: Claude (Anthropic)
-**Purpose**: Provide comprehensive internal documentation for TransformerEngine developers
-**Scope**: Low-precision quantization system (MXFP8, NVFP4, Blockwise FP8)
-**Style**: Literate programming with inline code and clickable links
+### 1. Context Manager Pattern
+- Uses `@contextmanager` decorator
+- Save/restore state for nested contexts
+- Guaranteed cleanup with try/finally
+
+### 2. Global State Manager Pattern
+- Class variables track global state
+- `AUTOCAST_DEPTH` for nested contexts
+- Centralized query interface for modules
+
+### 3. Factory Pattern
+- `RecipeState.create()` dispatches to recipe-specific class
+- `make_quantizers()` creates appropriate quantizers
+- Abstracts quantizer creation from modules
+
+### 4. Callable Quantizers
+- Quantizers implement `__call__()` method
+- Can be applied like functions: `quantizer(tensor)`
+- Transparent API for quantization
 
 ---
 
-## Document Statistics
+## Testing Infrastructure
 
-- **Total Documentation**: ~200KB across 3 files
-- **Source Files Referenced**: 50+ files traced
-- **Call Stacks Documented**: 10+ complete traces
-- **Code Snippets**: 100+ inline examples
-- **Clickable Links**: 200+ VSCode-compatible source links
+### Test Organization
 
-**Last Updated**: 2025
-**Base Commit**: bd55e7ba
-**Branch**: lowp
+```
+tests/pytorch/nvfp4/
+├── test_nvfp4_module_exact.py        # Main module tests
+├── test_nvfp4_gemm_exact.py          # GEMM kernel tests
+├── test_nvfp4_quantize_exact.py      # Quantization tests
+├── test_nvfp4_rht_quantize_exact.py  # RHT tests
+└── test_nvfp4_sr_quantize.py         # Stochastic rounding tests
+```
+
+### Validation Strategy
+
+- Compare native implementation against reference
+- Tolerance: rtol=1e-2 (1%), atol=1e-3
+- Accounts for quantization error (~1-2%)
+- Tests forward and backward passes
+
+---
+
+## Documentation Cross-References
+
+### From TE_AUTOCAST_ANALYSIS.md
+
+- **Section "autocast() Context Manager":** Implementation details (lines 789-852)
+- **Section "NVFP4BlockScaling Recipe Integration":** Recipe definition and factory
+- **Section "Call Flow: User to Kernel":** Complete data flow diagram
+- **Section "Test Case Walkthrough":** Example test execution
+
+### From NVFP4_TEST_WALKTHROUGH.md
+
+- **Section "Basic Module Test Walkthrough":** Factory setup and test execution
+- **Section "RHT Quantization Test":** RHT data flow with detailed steps
+- **Section "2D Quantization Test":** Weight quantization with 2D blocks
+- **Section "GEMM Test Walkthrough":** Kernel execution path
+- **Section "Test Validation Mechanisms":** Tolerance rationale
+
+---
+
+## Getting Started
+
+### To Understand autocast():
+
+1. Read: TE_AUTOCAST_ANALYSIS.md, "Architecture Overview" section
+2. Read: TE_AUTOCAST_ANALYSIS.md, "autocast() Context Manager" section
+3. Reference: quantization.py, lines 789-852
+
+### To Understand NVFP4BlockScaling:
+
+1. Read: TE_AUTOCAST_ANALYSIS.md, "NVFP4BlockScaling Recipe Integration" section
+2. Read: NVFP4_TEST_WALKTHROUGH.md, "RHT Quantization Test" and "2D Quantization Test"
+3. Reference: common/recipe/__init__.py, lines 386-481
+
+### To Trace Execution:
+
+1. Read: TE_AUTOCAST_ANALYSIS.md, "Call Flow: User to Kernel" section
+2. Read: NVFP4_TEST_WALKTHROUGH.md, "Basic Module Test Walkthrough"
+3. Reference: Test file execution path diagrams
+
+### To Run Tests:
+
+```bash
+cd /home/jeromeku/transformerengine
+python -m pytest tests/pytorch/nvfp4/test_nvfp4_module_exact.py -v
+```
+
+---
+
+## Environment Setup
+
+### Required
+
+- NVIDIA Blackwell GPU or compatible
+- CUDA 12.1+
+- cuBLASLt (for FP4 GEMM)
+- Compute capability 10.0+
+
+### Optional Environment Variables
+
+```bash
+# Control quantization features
+export NVTE_NVFP4_DISABLE_RHT=0                    # Enable RHT
+export NVTE_NVFP4_DISABLE_STOCHASTIC_ROUNDING=0   # Enable SR
+export NVTE_NVFP4_DISABLE_2D_QUANTIZATION=0       # Enable 2D
+
+# Verify support
+python -c "import transformer_engine.pytorch as te; print(te.is_nvfp4_available())"
+```
+
+---
+
+## Additional Resources
+
+### Related Files
+
+- `docs/examples/fp8_primer.py` - FP8/FP4 concepts and examples
+- `transformer_engine/pytorch/tensor/nvfp4_tensor.py` - NVFP4Quantizer implementation
+- `transformer_engine/pytorch/experimental/quantization_nvfp4.py` - Reference implementation
+
+### Papers
+
+- NVFP4: "Pretraining Large Language Models with NVFP4" (https://arxiv.org/abs/2509.25149v1)
+- MXFP8: OCP Microscaling Formats MX v1.0 Specification
+
+---
+
+## Document Maintenance
+
+**Last Updated:** 2025-10-27
+**Scope:** TransformerEngine with NVFP4BlockScaling recipe
+**Coverage:**
+- autocast() context manager implementation
+- FP8GlobalStateManager state management
+- RecipeState factory pattern
+- NVFP4 quantization pipeline
+- Test case walkthroughs
+- Device capability checks
+
+**Companion Documents:**
+- TE_AUTOCAST_ANALYSIS.md (Architecture and implementation)
+- NVFP4_TEST_WALKTHROUGH.md (Test case traces)
+
