@@ -1,9 +1,9 @@
 # MXFP8 Quantization: Microscaling FP8
 
 **Implementation Files:**
-- Python API: [`mxfp8_tensor.py`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/tensor/mxfp8_tensor.py)
-- C++ Implementation: [`quantizer.cpp`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/csrc/quantizer.cpp#L1091-L1103)
-- CUDA Kernel: [`quantize_mxfp8.cuh`](../../../../../3rdparty/transformerengine/transformer_engine/common/cast/mxfp8/quantize_mxfp8.cuh)
+- Python API: [`mxfp8_tensor.py`](../../transformer_engine/pytorch/tensor/mxfp8_tensor.py)
+- C++ Implementation: [`quantizer.cpp`](../../transformer_engine/pytorch/csrc/quantizer.cpp#L1091-L1103)
+- CUDA Kernel: [`quantize_mxfp8.cuh`](../../transformer_engine/common/cast/mxfp8/quantize_mxfp8.cuh)
 
 ## 📋 Overview
 
@@ -131,7 +131,7 @@ Range: E4M3: [0, 448], E5M2: [0, 57344]
 
 ### Frame 1: Python Entry Point
 
-**File:** [`mxfp8_tensor.py:26-46`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/tensor/mxfp8_tensor.py#L26-L46)
+**File:** [`mxfp8_tensor.py:26-46`](../../transformer_engine/pytorch/tensor/mxfp8_tensor.py#L26-L46)
 
 ```python
 class MXFP8Quantizer(Quantizer):
@@ -179,7 +179,7 @@ x_mxfp8 = quantizer(x)
 
 ### Frame 2: Memory Allocation
 
-**File:** [`mxfp8_tensor.py:85-138`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/tensor/mxfp8_tensor.py#L85-L138)
+**File:** [`mxfp8_tensor.py:85-138`](../../transformer_engine/pytorch/tensor/mxfp8_tensor.py#L85-L138)
 
 ```python
 def make_empty(
@@ -296,7 +296,7 @@ Total: 2.06 MB (1.94× smaller than FP32)
 
 ### Frame 3: Quantization Invocation
 
-**File:** [`mxfp8_tensor.py:47-73`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/tensor/mxfp8_tensor.py#L47-L73)
+**File:** [`mxfp8_tensor.py:47-73`](../../transformer_engine/pytorch/tensor/mxfp8_tensor.py#L47-L73)
 
 ```python
 def update_quantized(
@@ -360,7 +360,7 @@ mxfp8_quantizer.update_quantized(x, mxfp8_tensor)
 
 ### Frame 4: C++ Binding Layer
 
-**File:** [`pybind.cpp:120-121`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/csrc/extensions/pybind.cpp#L120-L121)
+**File:** [`pybind.cpp:120-121`](../../transformer_engine/pytorch/csrc/extensions/pybind.cpp#L120-L121)
 
 ```cpp
 // Python binding definition (same for MXFP8 and NVFP4)
@@ -396,7 +396,7 @@ void quantize(
 
 ### Frame 5: C++ Implementation
 
-**File:** [`quantizer.cpp:1091-1103`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/csrc/quantizer.cpp#L1091-L1103)
+**File:** [`quantizer.cpp:1091-1103`](../../transformer_engine/pytorch/csrc/quantizer.cpp#L1091-L1103)
 
 ```cpp
 void MXFP8Quantizer::quantize(
@@ -471,7 +471,7 @@ void MXFP8Quantizer::quantize(...) {
 
 ### Frame 6: CUDA Kernel Execution
 
-**File:** [`quantize_mxfp8.cuh:43-538`](../../../../../3rdparty/transformerengine/transformer_engine/common/cast/mxfp8/quantize_mxfp8.cuh#L43-L538)
+**File:** [`quantize_mxfp8.cuh:43-538`](../../transformer_engine/common/cast/mxfp8/quantize_mxfp8.cuh#L43-L538)
 
 ```cuda
 template <
@@ -822,15 +822,15 @@ x_nvfp4 = quantizer(x)
 ## 🔗 Related Files
 
 ### Implementation
-- **Python API**: [`mxfp8_tensor.py`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/tensor/mxfp8_tensor.py)
-- **C++ Wrapper**: [`quantizer.cpp:1091-1103`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/csrc/quantizer.cpp#L1091-L1103)
-- **CUDA Kernel**: [`quantize_mxfp8.cuh`](../../../../../3rdparty/transformerengine/transformer_engine/common/cast/mxfp8/quantize_mxfp8.cuh)
-- **Storage**: [`mxfp8_tensor_storage.py`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/tensor/storage/mxfp8_tensor_storage.py)
+- **Python API**: [`mxfp8_tensor.py`](../../transformer_engine/pytorch/tensor/mxfp8_tensor.py)
+- **C++ Wrapper**: [`quantizer.cpp:1091-1103`](../../transformer_engine/pytorch/csrc/quantizer.cpp#L1091-L1103)
+- **CUDA Kernel**: [`quantize_mxfp8.cuh`](../../transformer_engine/common/cast/mxfp8/quantize_mxfp8.cuh)
+- **Storage**: [`mxfp8_tensor_storage.py`](../../transformer_engine/pytorch/tensor/storage/mxfp8_tensor_storage.py)
 
 ### Tests
 - **Numerics**: [MXFP8 Numerics Tests →](06_mxfp8_numerics.md)
-- **Recipe**: [`test_recipe.py`](../../../../../3rdparty/transformerengine/tests/pytorch/test_recipe.py)
-- **Blockwise Scaling**: [`test_float8_blockwise_scaling_exact.py`](../../../../../3rdparty/transformerengine/tests/pytorch/test_float8_blockwise_scaling_exact.py)
+- **Recipe**: [`test_recipe.py`](../../tests/pytorch/test_recipe.py)
+- **Blockwise Scaling**: [`test_float8_blockwise_scaling_exact.py`](../../tests/pytorch/test_float8_blockwise_scaling_exact.py)
 
 ### Comparison
 - **NVFP4 Quantization**: [← NVFP4 Quantization Tests](01_nvfp4_quantize_exact.md)

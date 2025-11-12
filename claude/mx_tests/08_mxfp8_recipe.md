@@ -1,6 +1,6 @@
 # MXFP8 Recipe Tests - Complete Execution Trace
 
-**Test File:** [`3rdparty/transformerengine/tests/pytorch/test_recipe.py`](../../../../../3rdparty/transformerengine/tests/pytorch/test_recipe.py)
+**Test File:** [`3rdparty/transformerengine/tests/pytorch/test_recipe.py`](../../tests/pytorch/test_recipe.py)
 
 This document provides a comprehensive trace of how MXFP8BlockScaling recipe is tested, focusing on recipe configuration, quantizer instantiation, recipe switching, and state management.
 
@@ -889,14 +889,14 @@ Accuracy:
 ## Related Files
 
 ### Python Implementation
-- [recipe/__init__.py](../../../../../3rdparty/transformerengine/transformer_engine/common/recipe/__init__.py) - Recipe definitions
-- [mxfp8_tensor.py](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/tensor/mxfp8_tensor.py) - MXFP8Quantizer implementation
-- [linear.py](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/module/linear.py) - Recipe handling in modules
-- [fp8.py](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/fp8.py) - autocast implementation
+- [recipe/__init__.py](../../transformer_engine/common/recipe/__init__.py) - Recipe definitions
+- [mxfp8_tensor.py](../../transformer_engine/pytorch/tensor/mxfp8_tensor.py) - MXFP8Quantizer implementation
+- [linear.py](../../transformer_engine/pytorch/module/linear.py) - Recipe handling in modules
+- [fp8.py](../../transformer_engine/pytorch/fp8.py) - autocast implementation
 
 ### Test Files
-- [test_recipe.py](../../../../../3rdparty/transformerengine/tests/pytorch/test_recipe.py) - Recipe configuration tests
-- [test_numerics.py](../../../../../3rdparty/transformerengine/tests/pytorch/test_numerics.py) - Recipe usage in modules
+- [test_recipe.py](../../tests/pytorch/test_recipe.py) - Recipe configuration tests
+- [test_numerics.py](../../tests/pytorch/test_numerics.py) - Recipe usage in modules
 
 ---
 

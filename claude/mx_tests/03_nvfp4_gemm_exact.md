@@ -1,6 +1,6 @@
 # NVFP4 GEMM Tests: Exact Matching
 
-**Test File:** [`3rdparty/transformerengine/tests/pytorch/nvfp4/test_nvfp4_gemm_exact.py`](../../../../../3rdparty/transformerengine/tests/pytorch/nvfp4/test_nvfp4_gemm_exact.py)
+**Test File:** [`3rdparty/transformerengine/tests/pytorch/nvfp4/test_nvfp4_gemm_exact.py`](../../tests/pytorch/nvfp4/test_nvfp4_gemm_exact.py)
 
 ## 📋 Test Summary
 
@@ -107,7 +107,7 @@ Results must match within **`atol=8e-3, rtol=8e-3`** — acceptable tolerance fo
 
 ### Frame 1: Test Entry and Setup
 
-**File:** [`test_nvfp4_gemm_exact.py:221-242`](../../../../../3rdparty/transformerengine/tests/pytorch/nvfp4/test_nvfp4_gemm_exact.py#L221-L242)
+**File:** [`test_nvfp4_gemm_exact.py:221-242`](../../tests/pytorch/nvfp4/test_nvfp4_gemm_exact.py#L221-L242)
 
 ```python
 @pytest.mark.skipif(not recipe_available, reason=reason_for_no_recipe)
@@ -145,7 +145,7 @@ def test_nvfp4_gemm_versus_reference(
     )
 ```
 
-**File:** [`test_nvfp4_gemm_exact.py:18-48`](../../../../../3rdparty/transformerengine/tests/pytorch/nvfp4/test_nvfp4_gemm_exact.py#L18-L48)
+**File:** [`test_nvfp4_gemm_exact.py:18-48`](../../tests/pytorch/nvfp4/test_nvfp4_gemm_exact.py#L18-L48)
 
 ```python
 def check_nvfp4_gemm_versus_reference(
@@ -207,7 +207,7 @@ W_nvfp4: [1024, 512] uint8 + [1024, 64] scales
 
 ### Frame 2: Input Quantization (Native)
 
-**File:** [`test_nvfp4_gemm_exact.py:50-78`](../../../../../3rdparty/transformerengine/tests/pytorch/nvfp4/test_nvfp4_gemm_exact.py#L50-L78)
+**File:** [`test_nvfp4_gemm_exact.py:50-78`](../../tests/pytorch/nvfp4/test_nvfp4_gemm_exact.py#L50-L78)
 
 ```python
 # Create quantizers for inputs and weights
@@ -270,7 +270,7 @@ x_nvfp4_native = NVFP4Tensor(
 
 ### Frame 3: Extract Quantized Data for GEMM
 
-**File:** [`test_nvfp4_gemm_exact.py:80-107`](../../../../../3rdparty/transformerengine/tests/pytorch/nvfp4/test_nvfp4_gemm_exact.py#L80-L107)
+**File:** [`test_nvfp4_gemm_exact.py:80-107`](../../tests/pytorch/nvfp4/test_nvfp4_gemm_exact.py#L80-L107)
 
 ```python
 # Extract quantized data from NVFP4Tensors
@@ -338,7 +338,7 @@ Total:                                 → 1152 KB (vs 8192 KB unquantized FP32)
 
 ### Frame 4A: Native cuBLAS GEMM Execution
 
-**File:** [`test_nvfp4_gemm_exact.py:144-178`](../../../../../3rdparty/transformerengine/tests/pytorch/nvfp4/test_nvfp4_gemm_exact.py#L144-L178)
+**File:** [`test_nvfp4_gemm_exact.py:144-178`](../../tests/pytorch/nvfp4/test_nvfp4_gemm_exact.py#L144-L178)
 
 ```python
 # Setup cuBLAS GEMM parameters
@@ -406,7 +406,7 @@ NVIDIA cuBLAS Library
 
 ### Frame 4B: cuBLAS GEMM C++ Implementation
 
-**File:** [`gemm.cpp`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/csrc/extensions/gemm.cpp)
+**File:** [`gemm.cpp`](../../transformer_engine/pytorch/csrc/extensions/gemm.cpp)
 
 ```cpp
 std::vector<at::Tensor> generic_gemm(
@@ -469,7 +469,7 @@ std::vector<at::Tensor> generic_gemm(
 
 ### Frame 4C: cuBLAS Low-Level GEMM
 
-**File:** [`cublaslt_gemm.cu`](../../../../../3rdparty/transformerengine/transformer_engine/common/gemm/cublaslt_gemm.cu)
+**File:** [`cublaslt_gemm.cu`](../../transformer_engine/common/gemm/cublaslt_gemm.cu)
 
 ```cpp
 void nvte_cublas_gemm(
@@ -632,7 +632,7 @@ void nvte_cublas_gemm(
 
 ### Frame 5: Reference Quantization and GEMM (Python)
 
-**File:** [`test_nvfp4_gemm_exact.py:115-142`](../../../../../3rdparty/transformerengine/tests/pytorch/nvfp4/test_nvfp4_gemm_exact.py#L115-L142)
+**File:** [`test_nvfp4_gemm_exact.py:115-142`](../../tests/pytorch/nvfp4/test_nvfp4_gemm_exact.py#L115-L142)
 
 ```python
 # Create reference quantizer
@@ -666,7 +666,7 @@ y_ref = ref_quantizer.qgemm(
 )
 ```
 
-**File:** [`quantization_nvfp4.py:771-887`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/custom_recipes/quantization_nvfp4.py#L771-L887)
+**File:** [`quantization_nvfp4.py:771-887`](../../transformer_engine/pytorch/custom_recipes/quantization_nvfp4.py#L771-L887)
 
 ```python
 def qgemm(
@@ -814,7 +814,7 @@ def high_precision_gemm_ref(
 
 ### Frame 6: Result Comparison
 
-**File:** [`test_nvfp4_gemm_exact.py:180-188`](../../../../../3rdparty/transformerengine/tests/pytorch/nvfp4/test_nvfp4_gemm_exact.py#L180-L188)
+**File:** [`test_nvfp4_gemm_exact.py:180-188`](../../tests/pytorch/nvfp4/test_nvfp4_gemm_exact.py#L180-L188)
 
 ```python
 # Ensure y_ref and y_native are different tensors
@@ -1012,13 +1012,13 @@ NVFP4 requires 16-element alignment:
 ## 🔗 Related Files
 
 ### Implementation
-- **Python API**: [`generic_gemm binding`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/csrc/extensions/pybind.cpp)
-- **C++ Wrapper**: [`gemm.cpp`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/csrc/extensions/gemm.cpp)
-- **cuBLAS Interface**: [`cublaslt_gemm.cu`](../../../../../3rdparty/transformerengine/transformer_engine/common/gemm/cublaslt_gemm.cu)
+- **Python API**: [`generic_gemm binding`](../../transformer_engine/pytorch/csrc/extensions/pybind.cpp)
+- **C++ Wrapper**: [`gemm.cpp`](../../transformer_engine/pytorch/csrc/extensions/gemm.cpp)
+- **cuBLAS Interface**: [`cublaslt_gemm.cu`](../../transformer_engine/common/gemm/cublaslt_gemm.cu)
 
 ### Reference
-- **Reference GEMM**: [`quantization_nvfp4.py:771-887`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/custom_recipes/quantization_nvfp4.py#L771-L887)
-- **Dequantization**: [`quantization_nvfp4.py:75-116`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/custom_recipes/quantization_nvfp4.py#L75-L116)
+- **Reference GEMM**: [`quantization_nvfp4.py:771-887`](../../transformer_engine/pytorch/custom_recipes/quantization_nvfp4.py#L771-L887)
+- **Dequantization**: [`quantization_nvfp4.py:75-116`](../../transformer_engine/pytorch/custom_recipes/quantization_nvfp4.py#L75-L116)
 
 ### Related Tests
 - **Quantization**: [← NVFP4 Quantization Tests](01_nvfp4_quantize_exact.md)

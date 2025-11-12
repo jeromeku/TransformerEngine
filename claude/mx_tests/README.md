@@ -227,7 +227,7 @@ Each layer is documented with:
 All documentation includes **clickable file references**:
 
 ```markdown
-[nvfp4_tensor.py:179-181](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/tensor/nvfp4_tensor.py#L179-L181)
+[nvfp4_tensor.py:179-181](../../transformer_engine/pytorch/tensor/nvfp4_tensor.py#L179-L181)
 ```
 
 This allows you to:

@@ -1,6 +1,6 @@
 # NVFP4 Quantization Tests: Exact Matching
 
-**Test File:** [`3rdparty/transformerengine/tests/pytorch/nvfp4/test_nvfp4_quantize_exact.py`](../../../../../3rdparty/transformerengine/tests/pytorch/nvfp4/test_nvfp4_quantize_exact.py)
+**Test File:** [`3rdparty/transformerengine/tests/pytorch/nvfp4/test_nvfp4_quantize_exact.py`](../../tests/pytorch/nvfp4/test_nvfp4_quantize_exact.py)
 
 ## 📋 Test Summary
 
@@ -89,7 +89,7 @@ All tests must pass with `atol=0.0, rtol=0.0` — **exact byte-for-byte matching
 
 ### Frame 1: Test Entry Point (Python)
 
-**File:** [`test_nvfp4_quantize_exact.py:160-177`](../../../../../3rdparty/transformerengine/tests/pytorch/nvfp4/test_nvfp4_quantize_exact.py#L160-L177)
+**File:** [`test_nvfp4_quantize_exact.py:160-177`](../../tests/pytorch/nvfp4/test_nvfp4_quantize_exact.py#L160-L177)
 
 ```python
 @pytest.mark.skipif(not recipe_available, reason=reason_for_no_recipe)
@@ -123,7 +123,7 @@ def test_quantization_block_tiling_versus_reference(
 
 ### Frame 2: Test Setup (Python)
 
-**File:** [`test_nvfp4_quantize_exact.py:26-55`](../../../../../3rdparty/transformerengine/tests/pytorch/nvfp4/test_nvfp4_quantize_exact.py#L26-L55)
+**File:** [`test_nvfp4_quantize_exact.py:26-55`](../../tests/pytorch/nvfp4/test_nvfp4_quantize_exact.py#L26-L55)
 
 ```python
 def check_quantization_nvfp4_versus_reference(
@@ -172,7 +172,7 @@ Input tensor x:
 
 ### Frame 3A: Native Quantization - Python API Layer
 
-**File:** [`test_nvfp4_quantize_exact.py:56-62`](../../../../../3rdparty/transformerengine/tests/pytorch/nvfp4/test_nvfp4_quantize_exact.py#L56-L62)
+**File:** [`test_nvfp4_quantize_exact.py:56-62`](../../tests/pytorch/nvfp4/test_nvfp4_quantize_exact.py#L56-L62)
 
 ```python
 # Option 1: Use C++ allocator (automatically allocates output tensor)
@@ -186,7 +186,7 @@ else:
     x_nvfp4_sut = nvfp4_quantizer.update_quantized(x, x_nvfp4_sut)
 ```
 
-**File:** [`nvfp4_tensor.py:179-181`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/tensor/nvfp4_tensor.py#L179-L181)
+**File:** [`nvfp4_tensor.py:179-181`](../../transformer_engine/pytorch/tensor/nvfp4_tensor.py#L179-L181)
 
 ```python
 def quantize_impl(self, tensor: torch.Tensor) -> QuantizedTensor:
@@ -202,7 +202,7 @@ def quantize_impl(self, tensor: torch.Tensor) -> QuantizedTensor:
 
 ### Frame 3B: Native Quantization - Memory Allocation
 
-**File:** [`nvfp4_tensor.py:262-329`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/tensor/nvfp4_tensor.py#L262-L329)
+**File:** [`nvfp4_tensor.py:262-329`](../../transformer_engine/pytorch/tensor/nvfp4_tensor.py#L262-L329)
 
 ```python
 def make_empty(
@@ -308,7 +308,7 @@ Total quantized: ~70 KB (3.7× compression including overhead)
 
 ### Frame 4: C++ Binding Layer
 
-**File:** [`pybind.cpp:120-121`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/csrc/extensions/pybind.cpp#L120-L121)
+**File:** [`pybind.cpp:120-121`](../../transformer_engine/pytorch/csrc/extensions/pybind.cpp#L120-L121)
 
 ```cpp
 // Python binding definition
@@ -317,7 +317,7 @@ m.def("quantize", transformer_engine::pytorch::quantize,
       py::arg("output") = py::none(), py::arg("noop") = py::none());
 ```
 
-**File:** [`quantizer.cpp:1650-1653`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/csrc/quantizer.cpp#L1650-L1653)
+**File:** [`quantizer.cpp:1650-1653`](../../transformer_engine/pytorch/csrc/quantizer.cpp#L1650-L1653)
 
 ```cpp
 void NVFP4Quantizer::quantize(
@@ -339,7 +339,7 @@ void NVFP4Quantizer::quantize(
 
 ### Frame 5: C++ Quantization Implementation
 
-**File:** [`quantizer.cpp:1446-1677`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/csrc/quantizer.cpp#L1446-L1677)
+**File:** [`quantizer.cpp:1446-1677`](../../transformer_engine/pytorch/csrc/quantizer.cpp#L1446-L1677)
 
 ```cpp
 void NVFP4Quantizer::quantize_impl(
@@ -442,7 +442,7 @@ void NVFP4Quantizer::quantize_impl(
 
 ### Frame 6: CUDA Kernel - Main Quantization
 
-**File:** [`quantize_nvfp4.cuh:54-539`](../../../../../3rdparty/transformerengine/transformer_engine/common/cast/nvfp4/quantize_nvfp4.cuh#L54-L539)
+**File:** [`quantize_nvfp4.cuh:54-539`](../../transformer_engine/common/cast/nvfp4/quantize_nvfp4.cuh#L54-L539)
 
 ```cuda
 template <bool COMPUTE_ACTIVATIONS, typename ParamOP,
@@ -681,7 +681,7 @@ __global__ void quantize_nvfp4_kernel(
 
 ### Frame 7: NVFP4 Core Functions
 
-**File:** [`core_nvfp4.cuh:60-103`](../../../../../3rdparty/transformerengine/transformer_engine/common/cast/nvfp4/core_nvfp4.cuh#L60-L103)
+**File:** [`core_nvfp4.cuh:60-103`](../../transformer_engine/common/cast/nvfp4/core_nvfp4.cuh#L60-L103)
 
 ```cuda
 // Compute decoding scale (stored in FP8 E4M3 format)
@@ -765,7 +765,7 @@ Sign  Exponent  Mantissa  |  Decimal Value
 
 ### Frame 8: Reference Quantization (Python)
 
-**File:** [`quantization_nvfp4.py:561-665`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/custom_recipes/quantization_nvfp4.py#L561-L665)
+**File:** [`quantization_nvfp4.py:561-665`](../../transformer_engine/pytorch/custom_recipes/quantization_nvfp4.py#L561-L665)
 
 ```python
 def _quantize(self, tensor: torch.Tensor) -> Tuple[...]:
@@ -895,7 +895,7 @@ def _quantize_blockwise_reference(
     return quantized, decode_scale_e4m3, global_amax
 ```
 
-**File:** [`quantization_nvfp4.py:50-72`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/custom_recipes/quantization_nvfp4.py#L50-L72)
+**File:** [`quantization_nvfp4.py:50-72`](../../transformer_engine/pytorch/custom_recipes/quantization_nvfp4.py#L50-L72)
 
 ```python
 def cast_to_fp4x2(x: torch.Tensor) -> torch.Tensor:
@@ -928,7 +928,7 @@ def cast_to_fp4x2(x: torch.Tensor) -> torch.Tensor:
 
 ### Frame 9: Result Comparison
 
-**File:** [`test_nvfp4_quantize_exact.py:64-126`](../../../../../3rdparty/transformerengine/tests/pytorch/nvfp4/test_nvfp4_quantize_exact.py#L64-L126)
+**File:** [`test_nvfp4_quantize_exact.py:64-126`](../../tests/pytorch/nvfp4/test_nvfp4_quantize_exact.py#L64-L126)
 
 ```python
 # === Extract native results ===
@@ -1111,14 +1111,14 @@ recipe_available, reason = te.is_nvfp4_available(return_reason=True)
 ## 🔗 Related Files
 
 ### Implementation
-- **Python API**: [`nvfp4_tensor.py`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/tensor/nvfp4_tensor.py)
-- **C++ Wrapper**: [`quantizer.cpp:1446-1677`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/csrc/quantizer.cpp#L1446-L1677)
-- **CUDA Kernel**: [`quantize_nvfp4.cuh:54-539`](../../../../../3rdparty/transformerengine/transformer_engine/common/cast/nvfp4/quantize_nvfp4.cuh#L54-L539)
-- **Core Functions**: [`core_nvfp4.cuh`](../../../../../3rdparty/transformerengine/transformer_engine/common/cast/nvfp4/core_nvfp4.cuh)
+- **Python API**: [`nvfp4_tensor.py`](../../transformer_engine/pytorch/tensor/nvfp4_tensor.py)
+- **C++ Wrapper**: [`quantizer.cpp:1446-1677`](../../transformer_engine/pytorch/csrc/quantizer.cpp#L1446-L1677)
+- **CUDA Kernel**: [`quantize_nvfp4.cuh:54-539`](../../transformer_engine/common/cast/nvfp4/quantize_nvfp4.cuh#L54-L539)
+- **Core Functions**: [`core_nvfp4.cuh`](../../transformer_engine/common/cast/nvfp4/core_nvfp4.cuh)
 
 ### Reference
-- **Reference Quantizer**: [`quantization_nvfp4.py:340-740`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/custom_recipes/quantization_nvfp4.py#L340-L740)
-- **FP4 Encoding**: [`quantization_nvfp4.py:50-116`](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/custom_recipes/quantization_nvfp4.py#L50-L116)
+- **Reference Quantizer**: [`quantization_nvfp4.py:340-740`](../../transformer_engine/pytorch/custom_recipes/quantization_nvfp4.py#L340-L740)
+- **FP4 Encoding**: [`quantization_nvfp4.py:50-116`](../../transformer_engine/pytorch/custom_recipes/quantization_nvfp4.py#L50-L116)
 
 ### Related Tests
 - **RHT Tests**: [NVFP4 RHT Quantization →](02_nvfp4_rht_quantize.md)

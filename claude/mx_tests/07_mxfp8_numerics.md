@@ -1,6 +1,6 @@
 # MXFP8 Numerics Tests - Complete Execution Trace
 
-**Test File:** [`3rdparty/transformerengine/tests/pytorch/test_numerics.py`](../../../../../3rdparty/transformerengine/tests/pytorch/test_numerics.py)
+**Test File:** [`3rdparty/transformerengine/tests/pytorch/test_numerics.py`](../../tests/pytorch/test_numerics.py)
 
 This document provides a comprehensive trace of how MXFP8BlockScaling recipe is used throughout the numerics test suite, showing integration with TransformerEngine modules (Linear, LayerNormLinear, TransformerLayer, etc.).
 
@@ -1014,20 +1014,20 @@ Float8CurrentScaling (per-tensor):
 ## Related Files
 
 ### Python Implementation
-- [mxfp8_tensor.py](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/tensor/mxfp8_tensor.py) - MXFP8Quantizer and MXFP8Tensor classes
-- [recipe/__init__.py](../../../../../3rdparty/transformerengine/transformer_engine/common/recipe/__init__.py) - MXFP8BlockScaling recipe definition
-- [linear.py](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/module/linear.py) - Linear module with MXFP8 support
-- [grouped_linear.py](../../../../../3rdparty/transformerengine/transformer_engine/pytorch/module/grouped_linear.py) - GroupedLinear with MXFP8
+- [mxfp8_tensor.py](../../transformer_engine/pytorch/tensor/mxfp8_tensor.py) - MXFP8Quantizer and MXFP8Tensor classes
+- [recipe/__init__.py](../../transformer_engine/common/recipe/__init__.py) - MXFP8BlockScaling recipe definition
+- [linear.py](../../transformer_engine/pytorch/module/linear.py) - Linear module with MXFP8 support
+- [grouped_linear.py](../../transformer_engine/pytorch/module/grouped_linear.py) - GroupedLinear with MXFP8
 
 ### C++ Implementation
-- [quantizer.cpp](../../../../../3rdparty/transformerengine/transformer_engine/quantizer.cpp) - C++ quantization dispatcher
+- [quantizer.cpp](../../transformer_engine/quantizer.cpp) - C++ quantization dispatcher
 
 ### CUDA Implementation
-- [quantize_mxfp8.cuh](../../../../../3rdparty/transformerengine/transformer_engine/common/quantize_mxfp8.cuh) - MXFP8 quantization kernels
+- [quantize_mxfp8.cuh](../../transformer_engine/common/quantize_mxfp8.cuh) - MXFP8 quantization kernels
 
 ### Test Files
-- [test_numerics.py](../../../../../3rdparty/transformerengine/tests/pytorch/test_numerics.py) - Main numerics test suite
-- [test_recipe.py](../../../../../3rdparty/transformerengine/tests/pytorch/test_recipe.py) - Recipe configuration tests
+- [test_numerics.py](../../tests/pytorch/test_numerics.py) - Main numerics test suite
+- [test_recipe.py](../../tests/pytorch/test_recipe.py) - Recipe configuration tests
 
 ---
 
