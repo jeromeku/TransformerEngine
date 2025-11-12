@@ -8,7 +8,7 @@ This analysis documents the complete call path for `te.Linear` processing inputs
 
 ### 1. Recipe Detection Mechanism
 
-**File**: [transformer_engine/common/recipe/__init__.py:387-481](../transformer_engine/common/recipe/__init__.py#L387)
+**File**: [transformer_engine/common/recipe/__init__.py:387-481](../../../transformer_engine/common/recipe/__init__.py#L387)
 
 The `NVFP4BlockScaling` recipe is detected via:
 - `recipe.nvfp4()` → `isinstance(self, NVFP4BlockScaling)`
@@ -17,7 +17,7 @@ The `NVFP4BlockScaling` recipe is detected via:
 
 ### 2. Quantizer Architecture
 
-**File**: [transformer_engine/pytorch/tensor/nvfp4_tensor.py:112-338](transformer_engine/pytorch/tensor/nvfp4_tensor.py#L112)
+**File**: [transformer_engine/pytorch/tensor/nvfp4_tensor.py:112-338](../../../transformer_engine/pytorch/tensor/nvfp4_tensor.py#L112)
 
 Three NVFP4Quantizer instances per layer:
 - **Input quantizer**: 1D block scaling (16-element blocks) with optional RHT
@@ -26,7 +26,7 @@ Three NVFP4Quantizer instances per layer:
 
 ### 3. Forward Pass Flow
 
-**File**: [transformer_engine/pytorch/module/linear.py:1370-1500](transformer_engine/pytorch/module/linear.py#L1370)
+**File**: [transformer_engine/pytorch/module/linear.py:1370-1500](../../../transformer_engine/pytorch/module/linear.py#L1370)
 
 ```
 Linear.forward()

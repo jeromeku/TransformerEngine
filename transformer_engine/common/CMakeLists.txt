@@ -39,6 +39,7 @@ endif()
 # Process CMAKE_CUDA_ARCHITECTURES to separate generic and specific architectures
 set(NVTE_GENERIC_ARCHS)
 set(NVTE_SPECIFIC_ARCHS)
+message(STATUS "CMAKE_CUDA_ARCHITECTURES ${CMAKE_CUDA_ARCHITECTURES}")
 
 # Check for architecture 100
 list(FIND CMAKE_CUDA_ARCHITECTURES "100" arch_100_index)
@@ -79,7 +80,11 @@ if(NOT arch_120_index EQUAL -1)
   endif()
 endif()
 
-# cuDNN frontend API
+if (NOT CMAKE_CUDA_ARCHITECTURES)
+  set(CMAKE_CUDA_ARCHITECTURES "${NVTE_SPECIFIC_ARCHS}")
+endif()
+
+  # cuDNN frontend API
 set(CUDNN_FRONTEND_INCLUDE_DIR
     "${CMAKE_CURRENT_SOURCE_DIR}/../../3rdparty/cudnn-frontend/include")
 if(NOT EXISTS "${CUDNN_FRONTEND_INCLUDE_DIR}")
@@ -221,6 +226,8 @@ if (NVTE_WITH_CUBLASMP)
 list(APPEND transformer_engine_SOURCES
      comm_gemm/comm_gemm.cpp)
 endif()
+
+message(STATUS "CUDA ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
 
 add_library(transformer_engine SHARED ${transformer_engine_SOURCES})
 target_include_directories(transformer_engine PUBLIC
