@@ -31,7 +31,7 @@ These documents provide detailed execution traces with line numbers and source c
 
 ### 1. MXFP8 Quantization Implementation
 
-**[06_mxfp8_quantization.md](../mx_tests/06_mxfp8_quantization.md)**
+**[06_mxfp8_quantization.md](../../mx_tests/tests/06_mxfp8_quantization.md)**
 
 Complete frame-by-frame trace of quantization pipeline:
 
@@ -73,7 +73,7 @@ Complete frame-by-frame trace of quantization pipeline:
 
 ### 2. MXFP8 Numerics and Module Integration
 
-**[07_mxfp8_numerics.md](../mx_tests/07_mxfp8_numerics.md)**
+**[07_mxfp8_numerics.md](../../mx_tests/tests/07_mxfp8_numerics.md)**
 
 End-to-end training tests with MXFP8:
 
@@ -113,7 +113,7 @@ End-to-end training tests with MXFP8:
 
 ### 3. MXFP8 Recipe Configuration and Management
 
-**[08_mxfp8_recipe.md](../mx_tests/08_mxfp8_recipe.md)**
+**[08_mxfp8_recipe.md](../../mx_tests/tests/08_mxfp8_recipe.md)**
 
 Recipe tests and configuration:
 
@@ -148,11 +148,11 @@ Recipe tests and configuration:
 
 ## Test File Overview
 
-**[00_overview.md](../mx_tests/00_overview.md)**
+**[00_overview.md](../../mx_tests/tests/00_overview.md)**
 
 Summary of all test files covering MXFP8 and related features.
 
-**[SUMMARY.md](../mx_tests/SUMMARY.md)**
+**[SUMMARY.md](../../mx_tests/tests/SUMMARY.md)**
 
 High-level summary of findings across all tests.
 
@@ -215,8 +215,8 @@ High-level summary of findings across all tests.
 
 1. [00_START_HERE.md](00_START_HERE.md) - Full read (15 min)
 2. [README.md](README.md) - Architecture and call flow (30 min)
-3. [06_mxfp8_quantization.md](../mx_tests/06_mxfp8_quantization.md) - Frames 1-6 (45 min)
-4. [07_mxfp8_numerics.md](../mx_tests/07_mxfp8_numerics.md) - Frames 1-5 (30 min)
+3. [06_mxfp8_quantization.md](../../mx_tests/tests/06_mxfp8_quantization.md) - Frames 1-6 (45 min)
+4. [07_mxfp8_numerics.md](../../mx_tests/tests/07_mxfp8_numerics.md) - Frames 1-5 (30 min)
 
 **Result:** Understand complete implementation from Python API to CUDA kernels.
 
@@ -225,8 +225,8 @@ High-level summary of findings across all tests.
 ### Path 3: Testing and Integration (1.5 hours)
 
 1. [README.md](README.md) - Test coverage section (10 min)
-2. [07_mxfp8_numerics.md](../mx_tests/07_mxfp8_numerics.md) - Module integration (40 min)
-3. [08_mxfp8_recipe.md](../mx_tests/08_mxfp8_recipe.md) - Recipe management (40 min)
+2. [07_mxfp8_numerics.md](../../mx_tests/tests/07_mxfp8_numerics.md) - Module integration (40 min)
+3. [08_mxfp8_recipe.md](../../mx_tests/tests/08_mxfp8_recipe.md) - Recipe management (40 min)
 
 **Result:** Understand how MXFP8 integrates with TE modules and how to test it.
 
@@ -236,7 +236,7 @@ High-level summary of findings across all tests.
 
 Follow Path 2, then:
 
-1. [08_mxfp8_recipe.md](../mx_tests/08_mxfp8_recipe.md) - Full read (1 hour)
+1. [08_mxfp8_recipe.md](../../mx_tests/tests/08_mxfp8_recipe.md) - Full read (1 hour)
 2. [README.md](README.md) - Troubleshooting and FAQ (30 min)
 3. Review source code files listed above (1.5 hours)
 
@@ -247,36 +247,36 @@ Follow Path 2, then:
 ## Topic Index
 
 ### Quantization Mechanics
-- **E8M0 Scale Format:** [README.md](README.md#e8m0-scale-format), [06_mxfp8_quantization.md](../mx_tests/06_mxfp8_quantization.md#e8m0-scale-format)
-- **Block Size (32 elements):** [README.md](README.md#memory-layout), [06_mxfp8_quantization.md](../mx_tests/06_mxfp8_quantization.md#block-size-32-vs-16)
-- **Quantization Pipeline:** [README.md](README.md#quantization-pipeline), [06_mxfp8_quantization.md](../mx_tests/06_mxfp8_quantization.md#frame-by-frame-execution-trace)
+- **E8M0 Scale Format:** [README.md](README.md#e8m0-scale-format), [06_mxfp8_quantization.md](../../mx_tests/tests/06_mxfp8_quantization.md#e8m0-scale-format)
+- **Block Size (32 elements):** [README.md](README.md#memory-layout), [06_mxfp8_quantization.md](../../mx_tests/tests/06_mxfp8_quantization.md#block-size-32-vs-16)
+- **Quantization Pipeline:** [README.md](README.md#quantization-pipeline), [06_mxfp8_quantization.md](../../mx_tests/tests/06_mxfp8_quantization.md#frame-by-frame-execution-trace)
 
 ### Architecture
 - **Recipe Definition:** [README.md](README.md#recipe-configuration), [00_START_HERE.md](00_START_HERE.md#2-mxfp8blockscaling-recipe)
-- **Recipe State:** [08_mxfp8_recipe.md](../mx_tests/08_mxfp8_recipe.md#recipe-state-management)
-- **Quantizer Class:** [README.md](README.md#1-mxfp8quantizer), [06_mxfp8_quantization.md](../mx_tests/06_mxfp8_quantization.md#frame-1-python-entry-point)
-- **Tensor Storage:** [README.md](README.md#2-mxfp8tensor), [06_mxfp8_quantization.md](../mx_tests/06_mxfp8_quantization.md#frame-2-memory-allocation)
+- **Recipe State:** [08_mxfp8_recipe.md](../../mx_tests/tests/08_mxfp8_recipe.md#recipe-state-management)
+- **Quantizer Class:** [README.md](README.md#1-mxfp8quantizer), [06_mxfp8_quantization.md](../../mx_tests/tests/06_mxfp8_quantization.md#frame-1-python-entry-point)
+- **Tensor Storage:** [README.md](README.md#2-mxfp8tensor), [06_mxfp8_quantization.md](../../mx_tests/tests/06_mxfp8_quantization.md#frame-2-memory-allocation)
 
 ### Integration
 - **autocast() Context:** [README.md](README.md#call-flow-user-api-to-kernel), [00_START_HERE.md](00_START_HERE.md#4-call-flow)
-- **Module Integration:** [07_mxfp8_numerics.md](../mx_tests/07_mxfp8_numerics.md#frame-3-module-forward-pass)
-- **GEMM Operations:** [07_mxfp8_numerics.md](../mx_tests/07_mxfp8_numerics.md#frame-3b-groupedlinear-with-mxfp8)
+- **Module Integration:** [07_mxfp8_numerics.md](../../mx_tests/tests/07_mxfp8_numerics.md#frame-3-module-forward-pass)
+- **GEMM Operations:** [07_mxfp8_numerics.md](../../mx_tests/tests/07_mxfp8_numerics.md#frame-3b-groupedlinear-with-mxfp8)
 
 ### Testing
 - **Test Overview:** [README.md](README.md#test-coverage)
-- **Inference Tests:** [00_overview.md](../mx_tests/00_overview.md)
-- **Training Tests:** [07_mxfp8_numerics.md](../mx_tests/07_mxfp8_numerics.md)
-- **Recipe Tests:** [08_mxfp8_recipe.md](../mx_tests/08_mxfp8_recipe.md)
+- **Inference Tests:** [00_overview.md](../../mx_tests/tests/00_overview.md)
+- **Training Tests:** [07_mxfp8_numerics.md](../../mx_tests/tests/07_mxfp8_numerics.md)
+- **Recipe Tests:** [08_mxfp8_recipe.md](../../mx_tests/tests/08_mxfp8_recipe.md)
 
 ### Comparisons
-- **vs NVFP4:** [README.md](README.md#mxfp8-vs-other-recipes), [06_mxfp8_quantization.md](../mx_tests/06_mxfp8_quantization.md#mxfp8-vs-nvfp4-summary)
-- **vs DelayedScaling:** [08_mxfp8_recipe.md](../mx_tests/08_mxfp8_recipe.md#mxfp8-vs-delayedscaling)
+- **vs NVFP4:** [README.md](README.md#mxfp8-vs-other-recipes), [06_mxfp8_quantization.md](../../mx_tests/tests/06_mxfp8_quantization.md#mxfp8-vs-nvfp4-summary)
+- **vs DelayedScaling:** [08_mxfp8_recipe.md](../../mx_tests/tests/08_mxfp8_recipe.md#mxfp8-vs-delayedscaling)
 - **vs Float8BlockScaling:** [README.md](README.md#comparison-table)
 
 ### Performance
 - **Memory Layout:** [README.md](README.md#memory-layout)
-- **Bandwidth Analysis:** [README.md](README.md#memory-bandwidth), [06_mxfp8_quantization.md](../mx_tests/06_mxfp8_quantization.md#memory-bandwidth)
-- **Accuracy Characteristics:** [README.md](README.md#accuracy), [07_mxfp8_numerics.md](../mx_tests/07_mxfp8_numerics.md#frame-5c-accuracy-validation)
+- **Bandwidth Analysis:** [README.md](README.md#memory-bandwidth), [06_mxfp8_quantization.md](../../mx_tests/tests/06_mxfp8_quantization.md#memory-bandwidth)
+- **Accuracy Characteristics:** [README.md](README.md#accuracy), [07_mxfp8_numerics.md](../../mx_tests/tests/07_mxfp8_numerics.md#frame-5c-accuracy-validation)
 
 ### Practical Usage
 - **Quick Start:** [README.md](README.md#quick-start)

@@ -432,19 +432,19 @@ For comprehensive frame-by-frame execution traces and detailed analysis, see:
 
 The following files in `claude/mx_tests/tests/` provide detailed MXFP8 documentation:
 
-1. **[06_mxfp8_quantization.md](../mx_tests/06_mxfp8_quantization.md)**
+1. **[06_mxfp8_quantization.md](../../mx_tests/tests/06_mxfp8_quantization.md)**
    - Frame-by-frame quantization pipeline
    - Python → C++ → CUDA execution flow
    - E8M0 scale format details
    - Memory layout and allocation
 
-2. **[07_mxfp8_numerics.md](../mx_tests/07_mxfp8_numerics.md)**
+2. **[07_mxfp8_numerics.md](../../mx_tests/tests/07_mxfp8_numerics.md)**
    - End-to-end training tests
    - Module integration (Linear, LayerNormLinear, TransformerLayer)
    - Forward + backward pass with quantization
    - Accuracy validation and tolerance analysis
 
-3. **[08_mxfp8_recipe.md](../mx_tests/08_mxfp8_recipe.md)**
+3. **[08_mxfp8_recipe.md](../../mx_tests/tests/08_mxfp8_recipe.md)**
    - Recipe configuration and initialization
    - Recipe switching tests
    - Weight tensor and recipe correspondence
