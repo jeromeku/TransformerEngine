@@ -57,7 +57,7 @@ from ..cpp_extensions import (
 from ..constants import GemmParallelModes, dist_group_type
 from ..jit import no_torch_dynamo
 from ..graph import is_graph_capturing
-from ..tensor.quantized_tensor import (
+from ..quantized_tensor import (
     QuantizedTensor,
     QuantizedTensorStorage,
     Quantizer,
@@ -66,7 +66,7 @@ from ..tensor.quantized_tensor import (
 )
 from ..tensor.float8_tensor import Float8CurrentScalingQuantizer, Float8Quantizer
 from ..tensor.mxfp8_tensor import MXFP8Quantizer
-from ..tensor.utils import is_experimental
+from ..tensor.utils import is_custom
 from ..export import is_in_onnx_export_mode, assert_warmed_up
 from ..cpu_offload import is_cpu_offload_enabled, mark_activation_offload
 from ...debug.pytorch.debug_state import TEDebugState
@@ -153,8 +153,8 @@ class _Linear(torch.autograd.Function):
             ub_obj = get_ub(ub_name + "_fprop", fp8)
             ub_type = tex.CommOverlapType.AG
 
-        # experimental recipe check
-        experimental = is_experimental(input_quantizer) or is_experimental(weight_quantizer)
+        # custom recipe check
+        custom = is_custom(input_quantizer) or is_custom(weight_quantizer)
 
         # ------------------------------------------------------
         # Prepare input tensor
@@ -178,7 +178,7 @@ class _Linear(torch.autograd.Function):
             if fp8 or debug:
                 if input_quantizer is None:
                     raise ValueError("Missing quantizer for input tensor")
-                if not isinstance(inputmat, QuantizedTensorStorage) and not experimental:
+                if not isinstance(inputmat, QuantizedTensorStorage) and not custom:
                     own_quantized_input = True
                     input_quantizer.set_usage(rowwise=True, columnwise=backward_needs_input)
                     if isinstance(
@@ -240,7 +240,8 @@ class _Linear(torch.autograd.Function):
         weightmat = weight
         if fp8 or debug:
             # Configure quantizer
-            if weight_quantizer is not None:
+            # No need to set the quantizer states if weight is already quantized
+            if weight_quantizer is not None and not isinstance(weight, QuantizedTensor):
                 columnwise_usage = is_grad_enabled and inp.requires_grad
                 if not columnwise_usage:
                     columnwise_usage = (
@@ -248,7 +249,9 @@ class _Linear(torch.autograd.Function):
                         and not in_fp8_activation_recompute_phase()
                     )
                 weight_quantizer.set_usage(rowwise=True, columnwise=columnwise_usage)
-
+            elif isinstance(weight, QuantizedTensor):
+                # If weight is already quantized, no need to set quantizer states
+                weight_quantizer = weight._quantizer
             # Get quantized weight
             update_workspace = is_first_microbatch is None or is_first_microbatch
             weightmat = module.get_weight_workspace(
@@ -389,11 +392,6 @@ class _Linear(torch.autograd.Function):
             if backward_needs_input:
                 saved_inputmat = inputmat
 
-            # Weight with column-wise usage is needed for dgrad GEMM.
-            if inp.requires_grad:
-                if isinstance(weightmat, QuantizedTensorStorage):
-                    weightmat.update_usage(columnwise_usage=True)
-
             if cpu_offloading and saved_inputmat is not None:
                 mark_activation_offload(saved_inputmat)
 
@@ -448,7 +446,7 @@ class _Linear(torch.autograd.Function):
                     ctx.main_grad_func = lambda: weight.main_grad
 
             ctx.debug = debug
-            ctx.experimental = experimental
+            ctx.custom = custom
             ctx.cpu_offloading = cpu_offloading
             ctx.is_first_microbatch = is_first_microbatch
             ctx.use_bias = bias is not None
@@ -616,7 +614,7 @@ class _Linear(torch.autograd.Function):
                     if isinstance(inputmat, QuantizedTensorStorage):
                         # Input tensor is already quantized
                         pass
-                    elif ctx.debug or ctx.experimental:
+                    elif ctx.debug or ctx.custom:
                         # Debug quantizer will be applied immediately before wgrad GEMM
                         pass
                     else:

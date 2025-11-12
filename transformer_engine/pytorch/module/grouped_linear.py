@@ -13,6 +13,7 @@ import transformer_engine_torch as tex
 
 from transformer_engine.common.recipe import Recipe
 from .base import (
+    get_dummy_wgrad,
     get_multi_stream_cublas_workspace,
     TransformerEngineBaseModule,
     _2X_ACC_FPROP,
@@ -43,7 +44,7 @@ from ..graph import is_graph_capturing
 from ..cpu_offload import is_cpu_offload_enabled
 
 from ..tensor.float8_tensor import Float8CurrentScalingQuantizer, Float8Quantizer
-from ..tensor.quantized_tensor import (
+from ..quantized_tensor import (
     QuantizedTensorStorage,
     Quantizer,
     prepare_for_saving,
@@ -107,9 +108,15 @@ class _GroupedLinear(torch.autograd.Function):
                     is_fp8_activation_recompute_enabled()
                     and not in_fp8_activation_recompute_phase()
                 )
-            if weight_quantizers[0] is not None:
+            # No need to set the quantizer states if weight is already quantized
+            if weight_quantizers[0] is not None and not isinstance(
+                weights[0], QuantizedTensorStorage
+            ):
                 for weight_quantizer in weight_quantizers:
                     weight_quantizer.set_usage(rowwise=True, columnwise=columnwise_usage)
+            elif isinstance(weights[0], QuantizedTensorStorage):
+                # If weights are already quantized, no need to set quantizer states
+                weight_quantizers = [weight._quantizer for weight in weights]
         if output_quantizers[0] is not None:
             for output_quantizer in output_quantizers:
                 output_quantizer.set_usage(rowwise=True, columnwise=False)
@@ -204,10 +211,6 @@ class _GroupedLinear(torch.autograd.Function):
                             inputmat.update_usage(rowwise_usage=False, columnwise_usage=True)
             else:
                 inputmats = [None] * num_gemms
-            if inp.requires_grad:
-                for weight in weights_fp8:
-                    if isinstance(weight, QuantizedTensorStorage):
-                        weight.update_usage(columnwise_usage=True)
 
             if cpu_offloading:
                 ctx.grad_added_to_main_grad = hasattr(weights[0], "grad_added_to_main_grad")
@@ -353,13 +356,11 @@ class _GroupedLinear(torch.autograd.Function):
                     dtype=ctx.activation_dtype,
                     device=ctx.device,
                 )
-
-                for weight, quantizer in zip(weights, ctx.weight_quantizers):
-                    if quantizer is not None and isinstance(weight, QuantizedTensorStorage):
-                        weight.update_usage(
-                            rowwise_usage=quantizer.rowwise_usage,
-                            columnwise_usage=quantizer.columnwise_usage,
-                        )
+                # Make sure weights are available in column-wise format
+                # for dgrad computation.
+                for weight in weights:
+                    if isinstance(weight, QuantizedTensorStorage):
+                        weight.update_usage(columnwise_usage=True)
                 general_grouped_gemm(
                     weights,
                     grad_output,
@@ -447,18 +448,15 @@ class _GroupedLinear(torch.autograd.Function):
                         ):
                             weight.grad_added_to_main_grad = True
                             if getattr(weight, "zero_out_wgrad", False):
-                                wgrad = torch.zeros(
-                                    weight.main_grad.shape,
-                                    dtype=weight.dtype,
-                                    device=torch.cuda.current_device(),
-                                    requires_grad=False,
+                                wgrad = get_dummy_wgrad(
+                                    list(weight.main_grad.shape),
+                                    weight.dtype,
+                                    zero=True,
                                 )
                             else:
-                                wgrad = torch.empty(
-                                    weight.main_grad.shape,
-                                    dtype=weight.dtype,
-                                    device=torch.cuda.current_device(),
-                                    requires_grad=False,
+                                wgrad = get_dummy_wgrad(
+                                    list(weight.main_grad.shape),
+                                    weight.dtype,
                                 )
                         elif ctx.fuse_wgrad_accumulation:
                             wgrad = None
@@ -840,7 +838,7 @@ class GroupedLinear(TransformerEngineBaseModule):
         Execute the delayed weight gradient computation.
         This method is called after the main backward pass to compute weight gradients.
         """
-        if self.wgrad_store is None or not self.wgrad_store.delay_wgrad_compute():
+        if not self.need_backward_dw():
             return
         with torch.cuda.nvtx.range("_GroupedLinear_wgrad"):
             (_, grad_biases_, _), tensor_list = self.wgrad_store.pop()

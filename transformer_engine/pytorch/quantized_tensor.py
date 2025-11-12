@@ -2,10 +2,10 @@
 #
 # See LICENSE for license information.
 
-"""Tensor with quantized data"""
+"""Pure Python base classes for quantization."""
 
 from __future__ import annotations
-from typing import Callable, Optional, Tuple, Iterable, Any, Dict, Union
+from typing import Optional, Tuple, Iterable, Any, Dict, Union
 import abc
 import copy
 import warnings
@@ -14,6 +14,11 @@ import torch
 from torch.utils._pytree import tree_map
 
 from transformer_engine.common.recipe import Recipe
+from transformer_engine.pytorch.tensor._quantization_helpers import (
+    _QuantizeFunc,
+    _IdentityFunc,
+    _stride_from_shape,
+)
 
 
 class QuantizedTensorStorage:
@@ -310,73 +315,6 @@ class Quantizer(abc.ABC):
         return True
 
 
-class _QuantizeFunc(torch.autograd.Function):
-    """Quantize tensor"""
-
-    @staticmethod
-    def forward(
-        _ctx: Optional[torch.autograd.function.FunctionCtx],  # unused
-        tensor: torch.Tensor,
-        quantize_impl: Callable,
-    ) -> QuantizedTensor:
-        # pylint: disable=missing-function-docstring
-        return quantize_impl(tensor)
-
-    @staticmethod
-    def backward(
-        _ctx: torch.autograd.function.FunctionCtx,  # unused
-        grad: torch.Tensor,
-    ) -> Tuple[Optional[torch.Tensor], ...]:
-        # pylint: disable=missing-function-docstring
-        # Assume that we want gradients in full precision
-        return grad, None
-
-
-class _IdentityFunc(torch.autograd.Function):
-    """Identity function
-
-    If constructor keyword-arguments are provided, then construct a
-    new Float8Tensor using the provided tensor's attributes.
-
-    """
-
-    @staticmethod
-    def forward(
-        ctx, tensor: QuantizedTensor, init_kwargs: Optional[Dict[str, Any]] = None
-    ) -> QuantizedTensor:
-        # pylint: disable=missing-function-docstring
-
-        # Return input tensor if constructor kwargs are not provided
-        if init_kwargs is None:
-            return tensor.detach()
-
-        # Construct new tensor if constructor kwargs are provided
-        ctx.input_dtype = tensor.dtype
-        kwargs = tensor.get_metadata()
-        for key, val in init_kwargs.items():
-            kwargs[key] = val
-        return type(tensor)(tensor.shape, tensor.dtype, **kwargs)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        # pylint: disable=missing-function-docstring
-        grad_input = grad_output
-        if grad_input.dtype == ctx.input_dtype:
-            grad_input = grad_input.detach()
-        else:
-            grad_input = grad_input.to(ctx.input_dtype)
-        return grad_input, None
-
-
-def _stride_from_shape(shape: list[int]):
-    if len(shape) == 0:
-        return []
-    rstride = [1]
-    for d in reversed(shape[1:]):
-        rstride.append(rstride[-1] * d)
-    return list(reversed(rstride))
-
-
 class QuantizedTensor(torch.Tensor):
     """Abstract base class for tensor with quantized data
 
@@ -495,6 +433,10 @@ class QuantizedTensor(torch.Tensor):
                 and schema_arg.alias_info.is_write
             ):
                 arg.quantize_(new_arg)
+            elif isinstance(arg, list) and isinstance(new_arg, list):
+                # Recursively handle update for lists of tensors
+                for a, na in zip(arg, new_arg):
+                    maybe_update_inplace(a, na, schema_arg)
 
         # In-place op: dequantize, perform op, and quantize
         if func._schema.is_mutable:
@@ -551,20 +493,16 @@ class QuantizedTensor(torch.Tensor):
         shape: Optional[Iterable[int]] = None,
         dtype: Optional[torch.dtype] = None,
         requires_grad: bool = False,
-        data: Optional[torch.Tensor] = None,
     ) -> QuantizedTensor:
         """Create new quantized tensor
 
         By default, new tensor has the same attributes and underlying
-        data.
+        data. This function is intended to create view of tensors.
 
         """
-        if shape is None:
-            shape = data.shape if data is not None else tensor.shape
+        shape = shape if shape is not None else tensor.shape
         dtype = dtype if dtype is not None else tensor.dtype
         kwargs = tensor.get_metadata()
-        if data is not None:
-            kwargs["data"] = data
         return cls(shape=shape, dtype=dtype, requires_grad=requires_grad, **kwargs)
 
     def to_dtype(self, dtype: torch.dtype) -> QuantizedTensor:
