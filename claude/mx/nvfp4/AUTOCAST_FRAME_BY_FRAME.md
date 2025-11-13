@@ -1739,7 +1739,7 @@ return (
 
 **When the `with te.autocast():` block ends:**
 
-**Location:** [transformer_engine/pytorch/quantization.py:848-852](../transformer_engine/pytorch/quantization.py#L848-L852)
+**Location:** [transformer_engine/pytorch/quantization.py:848-852](../../../transformer_engine/pytorch/quantization.py#L848-L852)
 
 ```python
 @contextmanager

@@ -1312,7 +1312,7 @@ class Linear(TransformerEngineBaseModule):
             for name in self.bias_names:
                 bias = torch.Tensor().to(dtype=params_dtype, device=device)
                 setattr(self, name, bias)
-
+        breakpoint()
         if with_fp8_params:
             self.init_fp8_metadata()
 

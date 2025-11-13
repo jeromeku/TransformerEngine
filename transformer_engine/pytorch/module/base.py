@@ -1307,6 +1307,7 @@ class TransformerEngineBaseModule(torch.nn.Module, ABC):
                     )
                     quantizer.amax_reduction_group = amax_reduction_group
                     quantizer.with_amax_reduction = True
+                breakpoint()
                 # Quantize parameter
                 param = quantizer(param)
 

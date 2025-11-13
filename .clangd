@@ -1,0 +1,42 @@
+CompileFlags:
+  Compiler: /usr/bin/clang++
+  Add:
+    - -I/home/jk/transformerengine/transformer_engine/common/include 
+    - -I/home/jk/transformerengine/transformer_engine/pytorch/csrc
+    - -I/home/jk/transformerengine/.venv/lib/python3.12/site-packages/torch/include
+    - -I/home/jk/transformerengine/.venv/lib/python3.12/site-packages/torch/include/torch/csrc/api/include
+    - "-xcuda"
+    - "-ferror-limit=0"
+    - --std=c++17
+    - "-D__INTELLISENSE__"
+    - "-D__CLANGD__"
+    - "-DCUDA_12_0_SM90_FEATURES_SUPPORTED 1"
+    - "-DCUTLASS_ARCH_MMA_SM100_SUPPORTED 1"
+    - "-DCUTLASS_ARCH_MMA_SM90_SUPPORTED 1"
+    - "-D_LIBCUDACXX_STD_VER=12"
+    - "-D__CUDACC_VER_MAJOR__=12"
+    - "-D__CUDACC_VER_MINOR__=9"
+    - "-D__CUDA_ARCH__=1000"
+    - "-D__CUDA_ARCH_FEAT_SM90_ALL"
+    - "-Wno-invalid-constexpr"
+  Remove:
+#strip CUDA fatbin args
+    - "-Xfatbin*"
+#strip CUDA arch flags
+    - "-gencode*"
+    - "--generate-code*"
+#strip CUDA flags unknown to clang
+    - "-ccbin*"
+    - "--compiler-options*"
+    - "--expt-extended-lambda"
+    - "--expt-relaxed-constexpr"
+    - "-forward-unknown-to-host-compiler"
+    - "-Werror=cross-execution-space-call"
+Hover:
+  ShowAKA: Yes
+InlayHints:
+  Enabled: Yes
+Diagnostics:
+  Suppress:
+    - "variadic_device_fn"
+    - "attributes_not_allowed"

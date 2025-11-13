@@ -388,19 +388,20 @@ class TestFP8Recipe:
         [
             pytest.param(
                 MXFP8BlockScaling(),
-                marks=pytest.mark.skipif(not mxfp8_available, reason=reason_for_no_mxfp8),
+                marks=pytest.mark.skipif(not mxfp8_available, reason=reason_for_no_mxfp8),id="mxfp8"
             ),
             pytest.param(
                 Float8BlockScaling(),
                 marks=pytest.mark.skipif(
                     not fp8_block_scaling_available, reason=reason_for_no_fp8_block_scaling
-                ),
+                ),id="blockwisefp8"
             ),
         ],
     )
     def test_check_for_weight_tensor_and_recipe_correspondence(self, model_init_recipe):
         with quantized_model_init(enabled=True, recipe=model_init_recipe):
             linear = Linear(32, 32).cuda()
+            breakpoint()
 
         x = torch.randn(32, 32, device="cuda")
         with te.autocast(enabled=True, recipe=DelayedScaling()):
