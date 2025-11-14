@@ -328,7 +328,97 @@ void quantize_helper(const NVTETensor input, const NVTETensor grad, NVTETensor o
       NVTE_ERROR("Not implemented scaling mode: " + to_string(output_tensor->scaling_mode) + ".");
   }
 }
+
+For `4096, 1024` `f32` input
+```cpp
+(lldb) p (*output)
+(transformer_engine::Tensor) {
+  data = {
+    dptr = 0x0000155174000000
+    shape = size=2 {
+      [0] = 4096
+      [1] = 1024
+    }
+    dtype = kFloat8E4M3
+  }
+  columnwise_data = {
+    dptr = 0x0000155174400000
+    shape = size=2 {
+      [0] = 4096
+      [1] = 1024
+    }
+    dtype = kFloat8E4M3
+  }
+  amax = {
+    dptr = 0x0000000000000000
+    shape = size=1 {
+      [0] = 1
+    }
+    dtype = kFloat32
+  }
+  columnwise_amax = {
+    dptr = 0x0000000000000000
+    shape = size=1 {
+      [0] = 1
+    }
+    dtype = kFloat32
+  }
+  scale = {
+    dptr = 0x0000000000000000
+    shape = size=1 {
+      [0] = 1
+    }
+    dtype = kFloat32
+  }
+  scale_inv = {
+    dptr = 0x000015519d604000
+    shape = size=2 {
+      [0] = 4096
+      [1] = 32
+    }
+    dtype = kFloat8E8M0
+  }
+  columnwise_scale_inv = {
+    dptr = 0x000015519d624000
+    shape = size=2 {
+      [0] = 128
+      [1] = 1024
+    }
+    dtype = kFloat8E8M0
+  }
+  scaling_mode = NVTE_MXFP8_1D_SCALING
+  nvte_tensor = 0x0000000000000
+}
 ```
+
+/home/jk/transformerengine/transformer_engine/pytorch/csrc/quantizer.cpp:get_scale_shape
+```cpp
+  if (rowwise_usage) {
+    // rowwise scaling factor shape
+    size_t sinv0 = roundup(numel / last_dim, 128); // 4096
+    size_t sinv1 = roundup(last_dim / MXFP8_BLOCK_SIZE, 4); // 1024 / 32 = 32
+    scale_shape = {sinv0, sinv1};
+  } else {
+    // columnwise scaling factor shape
+    size_t sinv0 = roundup(numel / (last_dim * MXFP8_BLOCK_SIZE), 4); // 4096 / 32 = 32 * 4 = 128
+    size_t sinv1 = roundup(last_dim, 128); // 1024 
+    scale_shape = {sinv0, sinv1};
+  }
+```
+```cpp
+BUFF_DIM_Y, BUFF_DIM_X = 64, 32
+```
+```cpp
+THREADS_PER_CHUNK = 64
+IS_DBIAS = False, IS_DACT = False, IS_ACT = False
+quantize_mxfp8_kernel<IS_DBIAS, IS_DACT, IS_ACT, ParamOP, OP, IType, OType, true, true, CHUNK_DIM_Y, CHUNK_DIM_X, THREADS_PER_CHUNK>;
+scale_stride_rowwise, scale_stride_colwise = 32, 1024
+```
+/home/jk/transformerengine/transformer_engine/pytorch/csrc/extensions/cast.cpp:quantize
+/home/jk/transformerengine/transformer_engine/pytorch/csrc/quantizer.cpp:get_scale_shape
+/home/jk/transformerengine/transformer_engine/common/cast/cast.cu:nvte_quantize_v2
+/home/jk/transformerengine/transformer_engine/common/cast/dispatch/quantize.cuh:fwd_helper
+/home/jk/transformerengine/transformer_engine/common/cast/mxfp8/quantize_mxfp8.cuh:quantize
 
 **Key Dispatch Logic for MXFP8:**
 

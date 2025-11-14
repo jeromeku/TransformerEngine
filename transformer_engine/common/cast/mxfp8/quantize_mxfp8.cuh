@@ -645,12 +645,12 @@ void quantize(const Tensor &input, const Tensor *act_input, const Tensor *noop, 
                                  BUFF_DIM_Y, BUFF_DIM_X, cols, 0, output_type_bit_size);
           }
 
-          constexpr size_t buff_elems = BUFF_DIM_Y * BUFF_DIM_X;
+          constexpr size_t buff_elems = BUFF_DIM_Y * BUFF_DIM_X; // 64 * 32
           constexpr size_t buff_elems_total = BUFFS_NUM * buff_elems;
           constexpr size_t input_buff_size = (buff_elems_total * input_type_bit_size) / 8;
           constexpr size_t output_buff_size = (buff_elems_total * output_type_bit_size) / 8;
           constexpr size_t buff_size_aligned_in =
-              DIVUP_TO_MULTIPLE(input_buff_size, TMA_SHMEM_ALIGNMENT);
+              DIVUP_TO_MULTIPLE(input_buff_size, TMA_SHMEM_ALIGNMENT); // 128
           constexpr size_t buff_size_aligned_out =
               DIVUP_TO_MULTIPLE(output_buff_size, TMA_SHMEM_ALIGNMENT);
 
