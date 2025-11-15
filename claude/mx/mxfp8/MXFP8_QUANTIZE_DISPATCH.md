@@ -405,20 +405,152 @@ For `4096, 1024` `f32` input
     scale_shape = {sinv0, sinv1};
   }
 ```
+
 ```cpp
+
 BUFF_DIM_Y, BUFF_DIM_X = 64, 32
-```
-```cpp
 THREADS_PER_CHUNK = 64
 IS_DBIAS = False, IS_DACT = False, IS_ACT = False
 quantize_mxfp8_kernel<IS_DBIAS, IS_DACT, IS_ACT, ParamOP, OP, IType, OType, true, true, CHUNK_DIM_Y, CHUNK_DIM_X, THREADS_PER_CHUNK>;
 scale_stride_rowwise, scale_stride_colwise = 32, 1024
+
 ```
+
 /home/jk/transformerengine/transformer_engine/pytorch/csrc/extensions/cast.cpp:quantize
 /home/jk/transformerengine/transformer_engine/pytorch/csrc/quantizer.cpp:get_scale_shape
 /home/jk/transformerengine/transformer_engine/common/cast/cast.cu:nvte_quantize_v2
 /home/jk/transformerengine/transformer_engine/common/cast/dispatch/quantize.cuh:fwd_helper
 /home/jk/transformerengine/transformer_engine/common/cast/mxfp8/quantize_mxfp8.cuh:quantize
+
+```cpp
+template <bool IS_DBIAS, bool IS_DACT, bool IS_ACT, typename ParamOP,
+          float (*OP)(float, const ParamOP &), typename IType, typename OType, bool ROWWISE_SCALING,
+          bool COLWISE_SCALING, size_t CHUNK_DIM_Y, size_t CHUNK_DIM_X, size_t THREADS_PER_CHUNK>
+__global__ void __launch_bounds__(THREADS_PER_CHUNK)
+    quantize_mxfp8_kernel(const __grid_constant__ CUtensorMap tensor_map_input,
+                          const __grid_constant__ CUtensorMap tensor_map_act_input,
+                          const __grid_constant__ CUtensorMap tensor_map_output_rowwise,
+                          const __grid_constant__ CUtensorMap tensor_map_output_colwise,
+                          e8m0_t *const scales_rowwise, e8m0_t *const scales_colwise,
+                          const float *noop, float *const dbias_workspace, float *const amax_ptr,
+                          const size_t rows, const size_t cols, const size_t scale_stride_rowwise,
+                          const size_t scale_stride_colwise)
+```
+```cpp
+  constexpr size_t CHUNK_DIM_Y = CAST_DBIAS_ONLY ? 128 : 64;
+  constexpr size_t CHUNK_DIM_X = CAST_DBIAS_ONLY ? 128 : 64;
+  constexpr size_t THREADS_PER_CHUNK = CAST_DBIAS_ONLY ? 128 : 64;
+
+  constexpr size_t THREADS_X = CHUNK_DIM_X / SCALE_DIM_X;
+  constexpr size_t THREADS_Y = THREADS_PER_CHUNK / THREADS_X;
+  constexpr size_t BUFF_DIM_Y = THREADS_Y;
+  constexpr size_t BUFF_DIM_X = CHUNK_DIM_X;
+```
+```
+(const transformer_engine::Tensor *) act_input = nullptr
+(transformer_engine::Tensor *) dbias = nullptr
+(transformer_engine::Tensor *) workspace = nullptr
+(cudaStream_t) stream = nullptr
+(transformer_engine::Tensor *) output = 0x0000155199800260
+(const transformer_engine::Tensor *) noop = 0x00007fffffff8a90
+(const transformer_engine::Tensor &) input = 0x0000155199800010: {
+  data = {
+    dptr = 0x0000155189000000
+    shape = size=2 {
+      [0] = 4096
+      [1] = 1024
+    }
+    dtype = kFloat32
+  }
+  columnwise_data = {
+    dptr = 0x0000000000000000
+    shape = size=0 {}
+    dtype = kFloat32
+  }
+  amax = {
+    dptr = 0x0000000000000000
+    shape = size=1 {
+      [0] = 1
+    }
+    dtype = kFloat32
+  }
+  columnwise_amax = {
+    dptr = 0x0000000000000000
+    shape = size=1 {
+      [0] = 1
+    }
+    dtype = kFloat32
+  }
+  scale = {
+    dptr = 0x0000000000000000
+    shape = size=1 {
+      [0] = 1
+    }
+    dtype = kFloat32
+  }
+  scale_inv = {
+    dptr = 0x0000000000000000
+    shape = size=1 {
+      [0] = 1
+    }
+    dtype = kFloat32
+  }
+  columnwise_scale_inv = {
+    dptr = 0x0000000000000000
+    shape = size=1 {
+      [0] = 1
+    }
+    dtype = kFloat32
+  }
+  scaling_mode = NVTE_DELAYED_TENSOR_SCALING
+  nvte_tensor = 0x0000000000000001
+}
+(bool) use_rowwise_scaling = <variable not available>
+
+(bool) use_colwise_scaling = true
+(const size_t) rows = 4096
+(const size_t) cols = 1024
+(const bool) CAST_DBIAS_ONLY = false
+(const size_t) CHUNK_DIM_Y = 64
+(const size_t) CHUNK_DIM_X = 64
+(const size_t) THREADS_PER_CHUNK = 64
+(const size_t) THREADS_X = 2
+(const size_t) THREADS_Y = 32
+(const size_t) BUFF_DIM_Y = 32
+(const size_t) BUFF_DIM_X = 64
+(const size_t) blocks_Y = 64
+(const size_t) blocks_X = 16
+(const dim3) grid = (x = 16, y = 64, z = 1)
+(const size_t) block_size = 64
+(const size_t) scale_stride_rowwise = <variable not available>
+
+(const size_t) scale_stride_colwise = <variable not available>
+
+(transformer_engine::e8m0_t *const) scales_rowwise_ptr = <variable not available>
+
+(transformer_engine::e8m0_t *const) scales_colwise_ptr = <variable not available>
+
+(const size_t) dbias_rows = <variable not available>
+
+(const size_t) dbias_cols = <variable not available>
+
+(transformer_engine::ScalingType) scaling_type = BIDIMENSIONAL
+(float *const) workspace_ptr = 0x0000000000000000
+(float *const) amax_ptr = 0x0000000000000000
+(const float *) noop_ptr = <variable not available>
+```
+#### Launch params
+CHUNK_SIZE_{X,Y} = {64, 128}
+THREADS_PER_BLOCK = {64, 128}
+Each threads handles `scale_vec` num elements along block x
+E.g., THREADS_X = CHUNK_SIZE // SCALE_VEC = 64 // 32 = 2
+Remaining threads along y:
+THREADS_Y = THREADS_PER_BLOCK // THREADS_X = 64 // 2 = 32
+
+BUFF_DIM_Y = THREADS_Y  = 32
+BUFF_DIM_X = CHUNK_SIZE_X = 64
+
+So each block handles `64 x 64` tile of matrix in `32 x 64` chunk size stages
 
 **Key Dispatch Logic for MXFP8:**
 

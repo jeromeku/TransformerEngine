@@ -64,35 +64,38 @@ __global__ void __launch_bounds__(THREADS_PER_CHUNK)
       return;
     }
   }
-  constexpr size_t THREADS_X = CHUNK_DIM_X / SCALE_DIM_X;
-  constexpr size_t THREADS_Y = THREADS_PER_CHUNK / THREADS_X;
+  constexpr size_t THREADS_X = CHUNK_DIM_X / SCALE_DIM_X; // 64 // 32 = 2
+  constexpr size_t THREADS_Y = THREADS_PER_CHUNK / THREADS_X; // 64 // 2 = 32
 
-  constexpr size_t BUFF_DIM_Y = THREADS_Y;
-  constexpr size_t BUFF_DIM_X = CHUNK_DIM_X;
-  constexpr size_t BUFF_DIM = BUFF_DIM_Y * BUFF_DIM_X;
+  constexpr size_t BUFF_DIM_Y = THREADS_Y; // 32
+  constexpr size_t BUFF_DIM_X = CHUNK_DIM_X; // 64
+  constexpr size_t BUFF_DIM = BUFF_DIM_Y * BUFF_DIM_X; // 32 * 64
   static_assert(BUFF_DIM_Y == 32);
 
-  constexpr size_t STAGES = CHUNK_DIM_Y / BUFF_DIM_Y;
+  constexpr size_t STAGES = CHUNK_DIM_Y / BUFF_DIM_Y; // 64 / 32 = 2
   static_assert(STAGES >= 1);
 
   constexpr bool IS_CACHED_ACT_OP = COMPUTE_ACTIVATIONS && ROWWISE_SCALING && COLWISE_SCALING;
 
   const size_t block_offset_Y = blockIdx.y * CHUNK_DIM_Y;
   const size_t block_offset_X = blockIdx.x * CHUNK_DIM_X;
+
+  // Divide by scale vec along rows for rowwise, cols for colwise
+  // for 32 x 64 buffer, 32 x 2 row scales, 1 x 64 colwise scales
   const size_t scales_block_offset_Y_rowwise = blockIdx.y * CHUNK_DIM_Y;
-  const size_t scales_block_offset_X_rowwise = blockIdx.x * CHUNK_DIM_X / SCALE_DIM_X;
-  const size_t scales_block_offset_Y_colwise = blockIdx.y * CHUNK_DIM_Y / SCALE_DIM_Y;
+  const size_t scales_block_offset_X_rowwise = blockIdx.x * CHUNK_DIM_X / SCALE_DIM_X; // e.g., 2nd rowwise scale output block starts at 2 (64 // 32)
+  const size_t scales_block_offset_Y_colwise = blockIdx.y * CHUNK_DIM_Y / SCALE_DIM_Y; // e.g., 2nd colwise scale starts at 2 even though buff size is 32, chunk size is still 64 so 64 // 32 = 2
   const size_t scales_block_offset_X_colwise = blockIdx.x * CHUNK_DIM_X;
 
-  const size_t tid_Y_rowwise = threadIdx.x / THREADS_X;
-  const size_t tid_X_rowwise = threadIdx.x % THREADS_X;
+  const size_t tid_Y_rowwise = threadIdx.x / THREADS_X; // 0, 0, 1, 1, ... 31, 31
+  const size_t tid_X_rowwise = threadIdx.x % THREADS_X; // 0, 1
   const size_t tid_Y_colwise = 0;
-  const size_t tid_X_colwise = threadIdx.x;
+  const size_t tid_X_colwise = threadIdx.x; // 0, ..., 63
 
-  const size_t thread_offset_Y_rowwise = tid_Y_rowwise;
-  const size_t thread_offset_X_rowwise = tid_X_rowwise * SCALE_DIM_X;
-  const size_t thread_offset_Y_colwise = tid_Y_colwise;
-  const size_t thread_offset_X_colwise = tid_X_colwise;
+  const size_t thread_offset_Y_rowwise = tid_Y_rowwise; // 0, ..., 31
+  const size_t thread_offset_X_rowwise = tid_X_rowwise * SCALE_DIM_X; // 0, 32
+  const size_t thread_offset_Y_colwise = tid_Y_colwise; // 0
+  const size_t thread_offset_X_colwise = tid_X_colwise; // 0, ..., 63
 
   const size_t row_base_rowwise = block_offset_Y + thread_offset_Y_rowwise;
   const size_t row_base_colwise = block_offset_Y + thread_offset_Y_colwise;
@@ -100,6 +103,7 @@ __global__ void __launch_bounds__(THREADS_PER_CHUNK)
 
   const bool col_out_of_bounds_colwise = (col_base_colwise >= cols);
 
+  // output offsets
   const size_t scales_offset_Y_rowwise = scales_block_offset_Y_rowwise + tid_Y_rowwise;
   const size_t scales_offset_X_rowwise = scales_block_offset_X_rowwise + tid_X_rowwise;
   const size_t scales_offset_Y_colwise = scales_block_offset_Y_colwise + tid_Y_colwise;
