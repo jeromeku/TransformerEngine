@@ -97,7 +97,7 @@ transformer_engine/
 
 ### Definition
 
-**File:** `/home/jeromeku/transformerengine/transformer_engine/pytorch/quantization.py` [lines 789-852]
+**File:** [transformer_engine/pytorch/quantization.py](../../../../transformer_engine/pytorch/quantization.py#L789-L852)
 
 ```python
 @contextmanager
@@ -161,7 +161,7 @@ finally:
 
 ### Key Methods in FP8GlobalStateManager
 
-#### `autocast_enter()` [lines 553-589]
+#### `autocast_enter()` [lines [553-589](../../../../transformer_engine/pytorch/quantization.py#L553-L589)]
 
 ```python
 @classmethod
@@ -204,7 +204,7 @@ def autocast_enter(
             assert nvfp4_available, reason_for_no_nvfp4
 ```
 
-#### `autocast_exit()` [lines 591-601]
+#### `autocast_exit()` [lines [591-601](../../../../transformer_engine/pytorch/quantization.py#L591-L601)]
 
 ```python
 @classmethod
@@ -226,7 +226,7 @@ def autocast_exit(cls, enabled: bool, _graph: bool) -> None:
 
 ### Recipe Definition
 
-**File:** `/home/jeromeku/transformerengine/transformer_engine/common/recipe/__init__.py` [lines 386-481]
+**File:** [transformer_engine/common/recipe/__init__.py](../../../../transformer_engine/common/recipe/__init__.py#L386-L481)
 
 ```python
 @dataclass()
@@ -278,7 +278,7 @@ class NVFP4BlockScaling(Recipe):
 
 ### RecipeState Factory
 
-**File:** `/home/jeromeku/transformerengine/transformer_engine/pytorch/quantization.py` [lines 967-1026]
+**File:** [transformer_engine/pytorch/quantization.py](../../../../transformer_engine/pytorch/quantization.py#L967-L1026)
 
 ```python
 class RecipeState(abc.ABC):
@@ -323,7 +323,7 @@ class RecipeState(abc.ABC):
 
 ### NVFP4BlockScalingRecipeState
 
-**File:** `/home/jeromeku/transformerengine/transformer_engine/pytorch/quantization.py` [lines 1270-1343]
+**File:** [transformer_engine/pytorch/quantization.py](../../../../transformer_engine/pytorch/quantization.py#L1270-L1343)
 
 ```python
 class NVFP4BlockScalingRecipeState(RecipeState):
@@ -398,7 +398,7 @@ class NVFP4BlockScalingRecipeState(RecipeState):
 
 ### FP8GlobalStateManager Class Variables
 
-**File:** `/home/jeromeku/transformerengine/transformer_engine/pytorch/quantization.py` [lines 224-252]
+**File:** [transformer_engine/pytorch/quantization.py](../../../../transformer_engine/pytorch/quantization.py#L224-L252)
 
 ```python
 class FP8GlobalStateManager:
@@ -563,7 +563,7 @@ Application Code
 
 ### Linear Module Constructor
 
-**File:** `/home/jeromeku/transformerengine/pytorch/module/linear.py`
+**File:** [transformer_engine/pytorch/module/linear.py](../../../transformer_engine/pytorch/module/linear.py)
 
 The `te.Linear` module doesn't store quantizers - they are created dynamically based on the active autocast context and recipe.
 
@@ -614,7 +614,7 @@ During backward:
 
 ### Example: NVFP4 Module Test
 
-**File:** `/home/jeromeku/transformerengine/tests/pytorch/nvfp4/test_nvfp4_module_exact.py`
+**File:** [tests/pytorch/nvfp4/test_nvfp4_module_exact.py](../../../../tests/pytorch/nvfp4/test_nvfp4_module_exact.py)
 
 #### Test Setup
 
@@ -729,7 +729,7 @@ def check_nvfp4_module_versus_reference(
 
 ### Recipe Support Validation
 
-**File:** `/home/jeromeku/transformerengine/pytorch/quantization.py` [lines 89-99]
+**File:** [transformer_engine/pytorch/quantization.py](../../../../transformer_engine/pytorch/quantization.py#L89-L99)
 
 ```python
 def check_recipe_support(recipe: Recipe) -> None:
@@ -750,7 +750,7 @@ def check_recipe_support(recipe: Recipe) -> None:
 
 ### NVFP4 Availability Check
 
-**File:** `/home/jeromeku/transformerengine/pytorch/quantization.py` [lines 71-75]
+**File:** [transformer_engine/pytorch/quantization.py](../../../../transformer_engine/pytorch/quantization.py#L71-L75)
 
 ```python
 @functools.lru_cache(maxsize=None)

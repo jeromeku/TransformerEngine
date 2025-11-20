@@ -113,10 +113,11 @@ __global__ void __launch_bounds__(THREADS_PER_CHUNK)
 
   // helps resolving bank conflicts in shmem
   const int thread_lane = threadIdx.x % THREADS_PER_WARP;
-  const int bank_group = thread_lane / THREADS_PER_BANK;
+  const int bank_group = thread_lane / THREADS_PER_BANK; // 4 threads per bank assuming each thread handles single 1 byte scale factor
+  // each smem bank is 4 bytes
 
   constexpr size_t buff_elems = BUFF_DIM_Y * BUFF_DIM_X;
-  constexpr size_t buff_elems_total = BUFFS_NUM * buff_elems;
+  constexpr size_t buff_elems_total = BUFFS_NUM * buff_elems; // 2 * 32 * 64
   constexpr size_t buff_size_aligned_in =
       DIVUP_TO_MULTIPLE(buff_elems_total * sizeof(IType), TMA_SHMEM_ALIGNMENT);
   constexpr size_t buff_size_aligned_out =

@@ -1297,7 +1297,6 @@ class NVFP4BlockScalingRecipeState(RecipeState):
 
     def make_quantizers(self) -> list:
         from .tensor.nvfp4_tensor import NVFP4Quantizer
-
         # The index convention (coming from base.py set_meta_tensor)
         # is somewhat awkward. It assumes forward quantizers are
         # ordered [input, weight, output, ...] and backward quantizers

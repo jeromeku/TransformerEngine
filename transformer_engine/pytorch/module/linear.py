@@ -215,6 +215,7 @@ class _Linear(torch.autograd.Function):
                 )
 
         else:  # Do not all-gather input tensor
+            breakpoint()
             if fp8 or debug:
                 if isinstance(inputmat, QuantizedTensorStorage):
                     inputmat.update_usage(rowwise_usage=True)
@@ -237,6 +238,7 @@ class _Linear(torch.autograd.Function):
         # ------------------------------------------------------
         # Prepare weight tensor
         # ------------------------------------------------------
+        breakpoint()
         weightmat = weight
         if fp8 or debug:
             # Configure quantizer
@@ -254,6 +256,7 @@ class _Linear(torch.autograd.Function):
                 weight_quantizer = weight._quantizer
             # Get quantized weight
             update_workspace = is_first_microbatch is None or is_first_microbatch
+            breakpoint()
             weightmat = module.get_weight_workspace(
                 tensor=weight,
                 quantizer=weight_quantizer,
@@ -287,6 +290,7 @@ class _Linear(torch.autograd.Function):
 
         # Choose whether to use GEMM kernel with split accumulator
         use_split_accumulator = _2X_ACC_FPROP
+        # breakpoint()
         if fp8:
             recipe = FP8GlobalStateManager.get_fp8_recipe()
             if hasattr(recipe, "fp8_gemm_fprop"):
@@ -482,7 +486,7 @@ class _Linear(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor) -> Tuple[Union[torch.Tensor, None], ...]:
         # pylint: disable=missing-function-docstring
-
+        breakpoint()
         # NVTX label for profiling
         nvtx_label = "transformer_engine._Linear.backward"
         if ctx.ub_name is not None:
@@ -1331,6 +1335,7 @@ class Linear(TransformerEngineBaseModule):
 
     def set_meta_tensor(self, fwd: bool, recipe: Recipe) -> None:
         """Init scales and amaxes for fwd | bwd."""
+        
         super().set_meta_tensor(fwd, recipe)
 
         # customize quantizers based on each recipe & layer configs
@@ -1416,6 +1421,7 @@ class Linear(TransformerEngineBaseModule):
             ).is_fp8_ubuf():
                 fp8_grad = True
 
+        # breakpoint()
         with torch.cuda.device(
             getattr(self, list(self.named_parameters())[0][0]).device
         ), self.prepare_forward(
