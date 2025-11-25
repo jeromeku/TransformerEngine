@@ -4,7 +4,7 @@
 
 This document provides a frame-by-frame execution trace of the **NVFP4 quantization with Random Hadamard Transform (RHT)** test implementation in TransformerEngine. The test validates byte-for-byte accuracy of the native CUDA implementation against a pure Python reference.
 
-**Test File**: [`test_nvfp4_rht_quantize_exact.py`](../../../3rdparty/transformerengine/tests/pytorch/nvfp4/test_nvfp4_rht_quantize_exact.py)
+**Test File**: [`test_nvfp4_rht_quantize_exact.py`](../../tests/pytorch/nvfp4/test_nvfp4_rht_quantize_exact.py)
 
 ### Why Random Hadamard Transform?
 

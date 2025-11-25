@@ -446,7 +446,7 @@ This kernel handles arbitrary input types and shapes, but is less optimized than
 | **C++ Wrapper** | [cast.cpp](../../../transformer_engine/pytorch/csrc/extensions/cast.cpp) | 33-79 | Argument conversion & dispatch |
 | **Quantizer** | [quantizer.cpp](../../../transformer_engine/pytorch/csrc/quantizer.cpp) | Various | NVFP4Quantizer implementation |
 | **TE Core API** | [cast.cu](../../../transformer_engine/common/util/cast.cu) | 57-71 | nvte_quantize_v2 entry |
-| **Dispatcher** | [cast_kernels.cuh](../../../transformer_engine/common/util/cast_kernels.cuh) | 2034-2183 | quantize_helper dispatcher |
+| **Dispatcher** | [cast_kernels.cuh](../../../../transformer_engine/common/util/cast_kernels.cuh) | 2034-2183 | quantize_helper dispatcher |
 | **CUDA Kernel** | [nvfp4_transpose.cuh](../../../transformer_engine/common/util/nvfp4_transpose.cuh) | 1-1516 | Optimized NVFP4 kernel |
 
 ---

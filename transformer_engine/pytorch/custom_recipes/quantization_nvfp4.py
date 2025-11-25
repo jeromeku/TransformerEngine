@@ -480,6 +480,7 @@ class NVFP4QuantizerRef(Quantizer):
                 decode_scale.to(torch.float32),
             )
         else:
+            # global_encode_scale -> quantizes blockwise scales to fp8
             global_encode_scale = torch.div(FLOAT8_E4M3_MAX * FLOAT4_E2M1_MAX, global_amax)
             global_encode_scale = torch.min(
                 global_encode_scale,
@@ -491,8 +492,10 @@ class NVFP4QuantizerRef(Quantizer):
             )
             if global_encode_scale == torch.tensor(0.0, device=x.device, dtype=torch.float32):
                 global_encode_scale = torch.tensor(1.0, device=x.device, dtype=torch.float32)
+            # global decode scale dequantizes blockwise scales from fp8 -> fp32
             global_decode_scale = torch.div(1.0, global_encode_scale)
 
+            # quantize blockwise scales -> fp8
             decode_scale = decode_scale * global_encode_scale
             decode_scale = torch.min(
                 decode_scale,
@@ -504,7 +507,15 @@ class NVFP4QuantizerRef(Quantizer):
             )
             decode_scale = torch.clamp(decode_scale, min=-FLOAT8_E4M3_MAX, max=FLOAT8_E4M3_MAX)
             decode_scale = decode_scale.to(torch.float8_e4m3fn)
-
+            
+            # decode_scale at this point is the quantized blockwise scales in fp8
+            # multiplying by global_decode_scale needs to 
+            # 1. dequantize back to full precision: (decode_scale)_q * global_amax / FP8MAX * FP4MAX = (decode_scale)_q * (global_amax / FP4MAX) / FP8MAX
+            # Note that we need the FP4Max since we want to map FP8MAX -> global_amax / FP4MAX, which is the maximum 
+            # **scale_factor** (blockwise)
+            
+            # We have the quantized blockwise scales, now we need to calculate the quantization factor to convert from
+            # high precision inputs -> fp4
             encode_scale = torch.min(
                 torch.div(1.0, decode_scale.to(torch.float32) * global_decode_scale),
                 torch.tensor(
@@ -885,3 +896,4 @@ class NVFP4QuantizerRef(Quantizer):
 
         y = y.to(out_dtype)
         return y
+    
