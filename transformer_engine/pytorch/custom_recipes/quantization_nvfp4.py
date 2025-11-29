@@ -48,8 +48,14 @@ def nvfp4_ref_rht_2d_quantizer_factory(role):
 
 
 def cast_to_fp4x2(x):
-    """Quantize a tensor to FP4 E2M1 and store in a byte tensor"""
-
+    """Quantize a tensor to FP4 E2M1 and store in a byte tensor
+    Note the ranges used -- these emulate the rounding of ptx 
+    See __device__ __forceinline__ fp4e2m1x4 mul_cvt_bf16_to_fp4_4x_with_rn in `ptx.cuh`
+    Specifically:         
+    "cvt.rn.satfinite.e2m1x2.f32 f0, v0, v1;\n\t"
+    vectorized conversion from fp32 -> e2m1
+    """
+    # Note that ties -> even
     result = torch.zeros_like(x, dtype=torch.uint8)
     result[(x >= 0.0) & (x <= 0.25)] = 0
     result[(x > 0.25) & (x < 0.75)] = 1
@@ -98,7 +104,12 @@ def cast_from_fp4x2(x, dq_dtype):
     )
 
     # Convert to long integers for indexing
+
+    # Shift upper 4 bits >> 4
+
     second_bit = torch.div(x, 16, rounding_mode="floor").to(torch.long)
+    # Subtract upper 4 bits << 4
+    # Simpler to mask upper 4 bits, i.e., x & 0xF
     first_bit = (x - second_bit * 16).to(torch.long)
 
     # Use the long integers to index fp4_values
@@ -471,8 +482,11 @@ class NVFP4QuantizerRef(Quantizer):
         x = x.view(m, n // tile_len_x, tile_len_x)
         FLOAT4_E2M1_MAX = torch.tensor(6.0, device=x.device, dtype=torch.float32)
         FLOAT8_E4M3_MAX = torch.tensor(448.0, device=x.device, dtype=torch.float32)
+        
+        # Local (blockwise) decode scale, FP4 -> FP32 
         decode_scale = torch.div(vec_max, FLOAT4_E2M1_MAX)
 
+        # mxfp4 path
         if pow_2_scales:
             decode_scale = cast_to_e8(decode_scale)
             encode_scale = torch.div(
@@ -480,6 +494,10 @@ class NVFP4QuantizerRef(Quantizer):
                 decode_scale.to(torch.float32),
             )
         else:
+            # nvfp4 path -> FP8_MAX * FP4_MAX / global_amax = FP8_MAX / (global_amax / FP4_MAX)
+            # global_amax / FP4_MAX = local (blockwise) scale amax
+            # global_encode_scale quantizes local scale factors from FP32 -> FP8
+            # Here the "high-precision" max is max(blockwise scales) = max(blockwise_max / FP4_MAX) = global_amax / FP4_MAX 
             global_encode_scale = torch.div(FLOAT8_E4M3_MAX * FLOAT4_E2M1_MAX, global_amax)
             global_encode_scale = torch.min(
                 global_encode_scale,
@@ -491,8 +509,12 @@ class NVFP4QuantizerRef(Quantizer):
             )
             if global_encode_scale == torch.tensor(0.0, device=x.device, dtype=torch.float32):
                 global_encode_scale = torch.tensor(1.0, device=x.device, dtype=torch.float32)
+            
+            # global_decode_scale dequantizes from FP8 local scale factors -> FP32 local scale factors
             global_decode_scale = torch.div(1.0, global_encode_scale)
 
+            # Quantize local scale factors from FP32 -> FP8
+            
             decode_scale = decode_scale * global_encode_scale
             decode_scale = torch.min(
                 decode_scale,
@@ -504,7 +526,11 @@ class NVFP4QuantizerRef(Quantizer):
             )
             decode_scale = torch.clamp(decode_scale, min=-FLOAT8_E4M3_MAX, max=FLOAT8_E4M3_MAX)
             decode_scale = decode_scale.to(torch.float8_e4m3fn)
+            # decode scales are now in fp8; they convert from local fp4 -> fp32
+            # these are needed by Blackwell tensorcores for FP4 GEMM
 
+            # encode_scales are the local quantized scale factors used to convert from original dtype -> fp4
+            # Note the encode_scales are in fp32
             encode_scale = torch.min(
                 torch.div(1.0, decode_scale.to(torch.float32) * global_decode_scale),
                 torch.tensor(
@@ -514,10 +540,20 @@ class NVFP4QuantizerRef(Quantizer):
                 ),
             )
 
+        # Quantize to fp4
+        # See __device__ __forceinline__ fp4e2m1x4 mul_cvt_bf16_to_fp4_4x_with_rn for device conversion
+        # inputs are first upcast to fp32, quantized, then packed to 2 per uint8
         scaled_x = x.to(torch.float32) * encode_scale
 
         clipped_x = torch.clamp(scaled_x, -FLOAT4_E2M1_MAX, FLOAT4_E2M1_MAX).reshape(m, n)
 
+        # clipped_x is still in fp32
+        # cast_to_fp4x2 converts to fp4 range and packs into uint8
+        # Note the ranges used -- these emulate the cvt.rn.satfinite 
+        # See https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#data-movement-and-conversion-instructions-cvt
+        # `rn` - round to nearest even
+        # `satfinite` - NaN -> +MAX_NORM, clamped to -MAX_NORM, +MAX_NORM (-6, 6) for e2m1
+        # Even elements in lower 4 bits, odd upper 4 bits
         return cast_to_fp4x2(clipped_x), decode_scale.squeeze(-1)
 
     @staticmethod
@@ -831,6 +867,14 @@ class NVFP4QuantizerRef(Quantizer):
                 partial_alpha = qresult_x.global_amax_row * qresult_w.global_amax_row
             alpha = torch.div(partial_alpha, factor).squeeze(-1)
 
+        """
+        alpha = global_amax_a * (FP4_max * FP8_max) * ...
+         = (global_amax_a / FP4_max) * FP8_max * ...
+        Within accumulation loop, output of FP4 * FP4 is multipled by FP8 quantized scale factor
+        Multiplying by alpha dequantizes the scales to FP32
+        Note that the scale multiplication happens in quantized (FP8) space
+        """
+         
         M, K = high_precision_x.shape
         N, K_w = high_precision_w.shape
         assert K == K_w, "K dimension mismatch between qx and qw"
@@ -857,6 +901,12 @@ class NVFP4QuantizerRef(Quantizer):
         # Each output element (i, j) is fp32 accumulation of (K // block_length) inner products
         # Each inner product is sx * sw * (1, block_length) x (block_length, 1) with precision in fp32
         # Then batch the computation in M, N dimension
+
+        # Form M x 16, N x 16 -> (M x 16) x (16 x N) = (M x N),
+        # reduction is dim 16, so each output element maps to 1 set of block scales
+        # 16 x N -> need row of N scale factors.  Each output element maps to (i, j)'th scale factor
+        # there are K // 16 scale factors (grid_k)
+        # Each iteration indexes one col of A scale factors, 1 row of B scale factors
         for k in range(grid_k):
             k_start = k * block_length
             k_end = k_start + block_length

@@ -10,6 +10,7 @@ from transformer_engine.pytorch import NVFP4Quantizer
 from transformer_engine.pytorch.custom_recipes.quantization_nvfp4 import NVFP4QuantizerRef
 from transformer_engine.pytorch.custom_recipes import utils
 
+BLACKWELL_ENABLED = torch.cuda.get_device_capability(0)[0] >= 10
 
 # largest power of 2 representable in `torch.float8_e4m3fn`
 F8E4M3_LARGEST_POW2 = 8
@@ -75,17 +76,20 @@ def torch_native_gemm(x, w, y_ref, xq_ref, wq_ref, x_scales_ref, w_scales_ref, o
     w_scale_blocked = to_blocked(w_scale)
     RECIPE = [ScalingType.BlockWise1x16, ScalingType.TensorWise]
 
-    out = scaled_mm(
-        xq,
-        wq.T,
-        scale_a=[x_scale_blocked, x_global_scale],
-        scale_recipe_a=RECIPE,
-        scale_b=[w_scale_blocked, w_global_scale],
-        scale_recipe_b=RECIPE,
-        swizzle_a=swizzle,
-        swizzle_b=swizzle,
-        output_dtype=output_dtype,
-    )
+    if BLACKWELL_ENABLED:
+        out = scaled_mm(
+            xq,
+            wq.T,
+            scale_a=[x_scale_blocked, x_global_scale],
+            scale_recipe_a=RECIPE,
+            scale_b=[w_scale_blocked, w_global_scale],
+            scale_recipe_b=RECIPE,
+            swizzle_a=swizzle,
+            swizzle_b=swizzle,
+            output_dtype=output_dtype,
+        )
+    else:
+        out = None
     return out
 
 
@@ -101,6 +105,10 @@ def check_nvfp4_gemm_versus_reference(
     x_columnwise: bool = False,
     w_columnwise: bool = False,
 ):
+
+    # NVFP4 uses 16-element blocks, trim scales to remove padding
+    BLOCK_LENGTH = 16  # NVFP4 uses 16-element blocks
+
     te_dtype = tex.DType.kFloat4E2M1
 
     # Setup device and random seed
@@ -121,69 +129,68 @@ def check_nvfp4_gemm_versus_reference(
     else:
         out = None
 
-    # Native TE NVFP4 quantization
-    x_quantizer = NVFP4Quantizer(
-        fp4_dtype=te_dtype,
-        rowwise=True,
-        columnwise=True,
-        with_amax_reduction=False,
-        amax_reduction_group=None,
-        with_rht=False,
-        with_post_rht_amax=False,
-    )
-    w_quantizer = NVFP4Quantizer(
-        fp4_dtype=te_dtype,
-        rowwise=True,
-        columnwise=True,
-        with_amax_reduction=False,
-        amax_reduction_group=None,
-        with_rht=False,
-        with_post_rht_amax=False,
-    )
+    if BLACKWELL_ENABLED:
+        # Native TE NVFP4 quantization
+        x_quantizer = NVFP4Quantizer(
+            fp4_dtype=te_dtype,
+            rowwise=True,
+            columnwise=True,
+            with_amax_reduction=False,
+            amax_reduction_group=None,
+            with_rht=False,
+            with_post_rht_amax=False,
+        )
+        w_quantizer = NVFP4Quantizer(
+            fp4_dtype=te_dtype,
+            rowwise=True,
+            columnwise=True,
+            with_amax_reduction=False,
+            amax_reduction_group=None,
+            with_rht=False,
+            with_post_rht_amax=False,
+        )
 
-    # Quantize x and w
-    x_nvfp4_native = x_quantizer.make_empty(
-        x_shape, dtype=x_dtype, device=device, requires_grad=False
-    )
-    x_nvfp4_native = x_quantizer.update_quantized(x, x_nvfp4_native)
-    w_nvfp4_native = w_quantizer.make_empty(
-        w_shape, dtype=w_dtype, device=device, requires_grad=False
-    )
-    w_nvfp4_native = w_quantizer.update_quantized(w, w_nvfp4_native)
-    breakpoint()
-    # Extract quantized data from native NVFP4Tensors
-    qx_data = (
-        x_nvfp4_native._columnwise_data.view(dtype=torch.uint8)
-        if x_columnwise
-        else x_nvfp4_native._rowwise_data.view(dtype=torch.uint8)
-    )
-    qw_data = (
-        w_nvfp4_native._columnwise_data.view(dtype=torch.uint8)
-        if w_columnwise
-        else w_nvfp4_native._rowwise_data.view(dtype=torch.uint8)
-    )
-    sx_native = (
-        x_nvfp4_native._columnwise_scale_inv if x_columnwise else x_nvfp4_native._rowwise_scale_inv
-    )
-    sw_native = (
-        w_nvfp4_native._columnwise_scale_inv if w_columnwise else w_nvfp4_native._rowwise_scale_inv
-    )
-    breakpoint()
+        # Quantize x and w
+        x_nvfp4_native = x_quantizer.make_empty(
+            x_shape, dtype=x_dtype, device=device, requires_grad=False
+        )
+        x_nvfp4_native = x_quantizer.update_quantized(x, x_nvfp4_native)
+        w_nvfp4_native = w_quantizer.make_empty(
+            w_shape, dtype=w_dtype, device=device, requires_grad=False
+        )
+        w_nvfp4_native = w_quantizer.update_quantized(w, w_nvfp4_native)
+
+        # Extract quantized data from native NVFP4Tensors
+        qx_data = (
+            x_nvfp4_native._columnwise_data.view(dtype=torch.uint8)
+            if x_columnwise
+            else x_nvfp4_native._rowwise_data.view(dtype=torch.uint8)
+        )
+        qw_data = (
+            w_nvfp4_native._columnwise_data.view(dtype=torch.uint8)
+            if w_columnwise
+            else w_nvfp4_native._rowwise_data.view(dtype=torch.uint8)
+        )
+        sx_native = (
+            x_nvfp4_native._columnwise_scale_inv if x_columnwise else x_nvfp4_native._rowwise_scale_inv
+        )
+        sw_native = (
+            w_nvfp4_native._columnwise_scale_inv if w_columnwise else w_nvfp4_native._rowwise_scale_inv
+        )
     # Trim quantized data to match the actual tensor dimensions (remove padding)
-    qx_data = qx_data[:M, :]
-    qw_data = qw_data[:N, :]
+        qx_data = qx_data[:M, :]
+        qw_data = qw_data[:N, :]
 
-    # NVFP4 uses 16-element blocks, trim scales to remove padding
-    block_length = 16  # NVFP4 uses 16-element blocks
-    expected_sx_cols = expected_sw_cols = K // block_length
-    # Trim the scales to remove padding
-    sx_trimmed = sx_native[:M, :expected_sx_cols]
-    sw_trimmed = sw_native[:N, :expected_sw_cols]
+        expected_sx_cols = expected_sw_cols = K // BLOCK_LENGTH
+        # Trim the scales to remove padding
+        sx_trimmed = sx_native[:M, :expected_sx_cols]
+        sw_trimmed = sw_native[:N, :expected_sw_cols]
 
-    # Native scales are stored as uint8 but need to be interpreted as float8_e4m3fn
-    # for the reference GEMM to work correctly
-    sx_trimmed = sx_trimmed.view(torch.float8_e4m3fn)
-    sw_trimmed = sw_trimmed.view(torch.float8_e4m3fn)
+        # Native scales are stored as uint8 but need to be interpreted as float8_e4m3fn
+        # for the reference GEMM to work correctly
+        sx_trimmed = sx_trimmed.view(torch.float8_e4m3fn)
+        sw_trimmed = sw_trimmed.view(torch.float8_e4m3fn)
+
 
     # Create reference quantizer for reference GEMM
     ref_quantizer = NVFP4QuantizerRef(
@@ -194,11 +201,17 @@ def check_nvfp4_gemm_versus_reference(
         eps=0.0,
         quant_tile_shape=(1, 16),
     )
+    
     breakpoint()
-
     # Create reference quantized tensors needed by reference GEMM
     x_nvfp4_ref = ref_quantizer.quantize(x)
     w_nvfp4_ref = ref_quantizer.quantize(w)
+
+    if not BLACKWELL_ENABLED:
+        qx_data = x_nvfp4_ref.data
+        sx_trimmed = x_nvfp4_ref.scale
+        qw_data = w_nvfp4_ref.data
+        sw_trimmed = w_nvfp4_ref.scale
 
     # Reference GEMM using quantizer's qgemm method
     y_ref = ref_quantizer.qgemm(
@@ -218,6 +231,9 @@ def check_nvfp4_gemm_versus_reference(
 
     x_ref_scales = [x_nvfp4_ref.scale, x_nvfp4_ref.global_amax_row]
     w_ref_scales = [w_nvfp4_ref.scale, x_nvfp4_ref.global_amax_row]
+    
+    breakpoint()
+
     torch_ref = torch_native_gemm(
         x,
         w,
@@ -229,51 +245,52 @@ def check_nvfp4_gemm_versus_reference(
         output_dtype=out_dtype,
     )
     
-    # Native TE GEMM using tex.generic_gemm (cuBLAS GEMM)
-    # Allocate cuBLAS workspace
-    workspace = torch.empty(4, dtype=torch.uint8, device=device)
+    if BLACKWELL_ENABLED:
+        # Native TE GEMM using tex.generic_gemm (cuBLAS GEMM)
+        # Allocate cuBLAS workspace
+        workspace = torch.empty(4, dtype=torch.uint8, device=device)
 
-    transa = True if not w_columnwise else False
-    transb = False if not x_columnwise else True
-    out_quantizer = None
-    bias = None
-    bias_dtype = TE_DType[torch.bfloat16]
-    use_gelu = False
-    gelu_input = None
-    use_grad = False
-    use_split_accumulator = False
+        transa = True if not w_columnwise else False
+        transb = False if not x_columnwise else True
+        out_quantizer = None
+        bias = None
+        bias_dtype = TE_DType[torch.bfloat16]
+        use_gelu = False
+        gelu_input = None
+        use_grad = False
+        use_split_accumulator = False
 
-    # Native cuBLAS GEMM
-    # return type is out, bias_grad, gelu_input, extra_output
-    # We are just capturing out.
-    y_native = tex.generic_gemm(
-        w_nvfp4_native,
-        transa,
-        x_nvfp4_native,
-        transb,
-        out.clone() if accumulate else None,
-        out_quantizer,
-        TE_DType[out_dtype],
-        bias,
-        bias_dtype,
-        use_gelu,
-        gelu_input,
-        use_grad,
-        workspace,
-        workspace.shape[0],
-        accumulate,
-        use_split_accumulator,
-    )[0]
+        # Native cuBLAS GEMM
+        # return type is out, bias_grad, gelu_input, extra_output
+        # We are just capturing out.
+        y_native = tex.generic_gemm(
+            w_nvfp4_native,
+            transa,
+            x_nvfp4_native,
+            transb,
+            out.clone() if accumulate else None,
+            out_quantizer,
+            TE_DType[out_dtype],
+            bias,
+            bias_dtype,
+            use_gelu,
+            gelu_input,
+            use_grad,
+            workspace,
+            workspace.shape[0],
+            accumulate,
+            use_split_accumulator,
+        )[0]
 
-    # just in case of accumulation, make sure y_ref and y_native are not the same tensor
-    assert y_ref is not y_native, "y_ref and y_native should not be the same tensor"
-    # Reset nans to zeros because torch.assert_close does not assume nans to be equal
-    assert not torch.isnan(y_ref.float()).all(), "All elements are nan"
-    y_ref = torch.where(y_ref.isnan(), torch.zeros_like(y_ref), y_ref)
-    y_native = torch.where(y_native.isnan(), torch.zeros_like(y_native), y_native)
+        # just in case of accumulation, make sure y_ref and y_native are not the same tensor
+        assert y_ref is not y_native, "y_ref and y_native should not be the same tensor"
+        # Reset nans to zeros because torch.assert_close does not assume nans to be equal
+        assert not torch.isnan(y_ref.float()).all(), "All elements are nan"
+        y_ref = torch.where(y_ref.isnan(), torch.zeros_like(y_ref), y_ref)
+        y_native = torch.where(y_native.isnan(), torch.zeros_like(y_native), y_native)
 
-    # Compare results with some tolerance
-    torch.testing.assert_close(y_native, y_ref, atol=8e-3, rtol=8e-3)
+        # Compare results with some tolerance
+        torch.testing.assert_close(y_native, y_ref, atol=8e-3, rtol=8e-3)
 
 
 SHAPES = [
