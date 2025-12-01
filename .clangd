@@ -2,10 +2,13 @@ CompileFlags:
   Compiler: /usr/bin/clang++
   CompilationDatabase: build/cmake
   Add:
-    - -I/home/jk/transformerengine/transformer_engine/common/include 
+    - -I/home/jk/transformerengine/transformer_engine/common/include
+    - -I/home/jk/transformerengine/transformer_engine/pytorch/csrc/extensions
     - -I/home/jk/transformerengine/transformer_engine/pytorch/csrc
     - -I/home/jk/transformerengine/.venv/lib/python3.12/site-packages/torch/include
     - -I/home/jk/transformerengine/.venv/lib/python3.12/site-packages/torch/include/torch/csrc/api/include
+    - -I/home/jk/transformerengine/.venv/lib/python3.12/site-packages/pybind11/include
+    - -I/home/jk/.local/share/uv/python/cpython-3.12.11-linux-x86_64-gnu/include/python3.12
     - "-xcuda"
     - "-ferror-limit=0"
     - --std=c++17

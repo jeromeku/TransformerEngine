@@ -218,6 +218,7 @@ def check_nvfp4_gemm_versus_reference(
 
     x_ref_scales = [x_nvfp4_ref.scale, x_nvfp4_ref.global_amax_row]
     w_ref_scales = [w_nvfp4_ref.scale, x_nvfp4_ref.global_amax_row]
+
     torch_ref = torch_native_gemm(
         x,
         w,
@@ -228,7 +229,10 @@ def check_nvfp4_gemm_versus_reference(
         w_scales_ref=w_ref_scales,
         output_dtype=out_dtype,
     )
-    
+    breakpoint()
+    diff = (torch_ref - y_ref).abs().max()
+    print(f"Torch scale_mm vs TE Ref: {diff.cpu().item():.4f}")
+
     # Native TE GEMM using tex.generic_gemm (cuBLAS GEMM)
     # Allocate cuBLAS workspace
     workspace = torch.empty(4, dtype=torch.uint8, device=device)
