@@ -10,20 +10,21 @@ from transformer_engine.pytorch import NVFP4Quantizer
 from transformer_engine.pytorch.custom_recipes.quantization_nvfp4 import NVFP4QuantizerRef
 from transformer_engine.pytorch.custom_recipes import utils
 
-
 # largest power of 2 representable in `torch.float8_e4m3fn`
 F8E4M3_LARGEST_POW2 = 8
 # largest power of 2 representable in `torch.float4_e2m1fn_x2`
 FP4E2M1FN_LARGEST_POW2 = 2.0
-# max value of `torch.float8_e4m3fn` (448)
-F8E4M3_MAX_VAL = torch.finfo(torch.float8_e4m3fn).max
+
 # exponent bias of `torch.float8_e8m0fnu`
 F8E8M0_EXP_BIAS = 127
 # exponent and mantissa bits of `torch.float4_e2m1fn_x2`
 FP4_EBITS, FP4_MBITS = 2, 1
 FP4_MAX_VAL = 6.0
 
+# max value of `torch.float8_e4m3fn` (448)
+FP8E4M3_MAX_VAL = torch.finfo(torch.float8_e4m3fn).max
 
+# https://github.com/pytorch/pytorch/blob/a5436a5e8e4ee42d1debf52c2786c7ae0043a434/test/test_scaled_matmul_cuda.py#L490
 def data_to_nvfp4_with_global_scale(x, block_size):
     # Simple (slow) reference implementation of NVFP4 two-level-scaling
     from torch.testing._internal.common_quantized import _bfloat16_to_float4_e2m1fn_x2
@@ -31,6 +32,18 @@ def data_to_nvfp4_with_global_scale(x, block_size):
     orig_shape = x.shape
     x = x.reshape(-1, block_size)
 
+    """
+    Scale Factor and quantization
+    - Calculate blockwise scales in HP, used for (HP -> FP4)
+    - Calculate global scale factor for quantizing blockwise scales from HP -> FP8
+    - Quantize blockwise scales from HP -> FP8 using global scale factor.  Blockwise scale factors now in FP8
+    - Dequantize quantized scale factors from FP8 -> HP using global scale factor
+    - Invert to get encoding factor for converting inputs from HP -> FP4
+    - Blockwise quantize inputs from HP -> FP4
+    - Return quantized inputs, quantized (FP8) blockwise scales, and global scale factor (needed for decoding quantized blockwise scales)
+    """
+
+    
     # Per-block-amax
     block_max = torch.amax(torch.abs(x), 1) + 1e-12
 
@@ -39,7 +52,7 @@ def data_to_nvfp4_with_global_scale(x, block_size):
 
     # Constants
     # Global encoding scale for block-scales
-    S_enc = FP4_MAX_VAL * F8E4M3_MAX_VAL / global_max
+    S_enc = FP4_MAX_VAL * FP8E4M3_MAX_VAL / global_max
     S_dec = 1.0 / S_enc
 
     # Per-block decode-scale
@@ -48,8 +61,8 @@ def data_to_nvfp4_with_global_scale(x, block_size):
     # Stored scaled-e4m3 per-block decode scales
     S_dec_b_e4m3 = (S_dec_b * S_enc).to(torch.float8_e4m3fn)
 
-    # Actual per-block encoding scale
-    S_enc_b = S_enc / S_dec_b_e4m3.float()
+    # Actual per-block encoding scale - dequantize the fp8 quantized block scales
+    S_enc_b = S_enc / S_dec_b_e4m3.float() # = 1 / (S_dec * S_dec_b_e4m3) where S_dec dequantizes scales from FP8 -> FP32
 
     # scale & reshape input, reshape scales
     x = (S_enc_b.unsqueeze(1) * x).bfloat16().reshape(orig_shape)
@@ -61,19 +74,16 @@ def data_to_nvfp4_with_global_scale(x, block_size):
     # fp4x2, fp8_e4m3, float respectively
     return x_fp4, S_dec_b_e4m3, S_dec.float()
 
+def torch_native_quantize_fp4(x, block_size: int = 16):
+    xq, x_scale, x_global_scale = data_to_nvfp4_with_global_scale(x, block_size)
+    return xq, x_scale, x_global_scale
 
-def torch_native_gemm(x, w, y_ref, xq_ref, wq_ref, x_scales_ref, w_scales_ref, output_dtype):
-    from torch.nn.functional import scaled_mm, ScalingType, SwizzleType
-    from torch.testing._internal.common_quantized import to_blocked
-
-    x_scale_ref, x_global_scale_ref = x_scales_ref
-    w_scale_ref, w_global_scale_ref = w_scales_ref
-    swizzle = [SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE]
-    xq, x_scale, x_global_scale = data_to_nvfp4_with_global_scale(x, 16)
-    wq, w_scale, w_global_scale = data_to_nvfp4_with_global_scale(w, 16)
-    x_scale_blocked = to_blocked(x_scale)
-    w_scale_blocked = to_blocked(w_scale)
+# https://github.com/pytorch/pytorch/blob/a5436a5e8e4ee42d1debf52c2786c7ae0043a434/test/test_scaled_matmul_cuda.py#L1820
+def torch_native_gemm(xq, x_scale_blocked, x_global_scale, wq, w_scale_blocked, w_global_scale, output_dtype):
+    from torch.nn.functional import ScalingType, scaled_mm, SwizzleType
+    
     RECIPE = [ScalingType.BlockWise1x16, ScalingType.TensorWise]
+    swizzle = [SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE]
 
     out = scaled_mm(
         xq,
@@ -199,6 +209,13 @@ def check_nvfp4_gemm_versus_reference(
     # Create reference quantized tensors needed by reference GEMM
     x_nvfp4_ref = ref_quantizer.quantize(x)
     w_nvfp4_ref = ref_quantizer.quantize(w)
+    
+    te_global_scale_x = x_nvfp4_ref.global_amax_row / (FP4_MAX_VAL * FP8E4M3_MAX_VAL)
+    te_scale_x = x_nvfp4_ref.scale
+    te_qx = x_nvfp4_ref.data
+
+    te_scale_diff = te_scale_x.float().sub(sx_trimmed.float()).abs().max().item()
+    print(f"TE Scale diff: {te_scale_diff:.4f}")
 
     # Reference GEMM using quantizer's qgemm method
     y_ref = ref_quantizer.qgemm(
@@ -216,17 +233,28 @@ def check_nvfp4_gemm_versus_reference(
         qresult_w=w_nvfp4_ref,
     )
 
-    x_ref_scales = [x_nvfp4_ref.scale, x_nvfp4_ref.global_amax_row]
-    w_ref_scales = [w_nvfp4_ref.scale, x_nvfp4_ref.global_amax_row]
+    from torch.testing._internal.common_quantized import to_blocked
 
+    xq_torch, x_scales_torch, x_global_scale_torch = torch_native_quantize_fp4(x)
+    wq_torch, w_scales_torch, w_global_scale_torch = torch_native_quantize_fp4(w)
+
+    x_scales_torch_blocked = to_blocked(x_scales_torch)
+    w_scales_torch_blocked = to_blocked(w_scales_torch)
+    
+    # Check te vs torch
+
+    global_scale_diff = x_global_scale_torch.sub(te_global_scale_x).abs().max()
+    print(f"TE vs Torch global scale diff: {global_scale_diff:.4f}")
+    xq_diff = xq_torch.view(torch.uint8).float().sub(te_qx.float()).abs().max()
+    print(f"TE vs Torch xq diff: {xq_diff:.4f}")
+    breakpoint()
     torch_ref = torch_native_gemm(
-        x,
-        w,
-        y_ref=y_ref,
-        xq_ref=qx_data,
-        wq_ref=qw_data,
-        x_scales_ref=x_ref_scales,
-        w_scales_ref=w_ref_scales,
+        xq=xq_torch,
+        x_scale_blocked=x_scales_torch_blocked,
+        x_global_scale=x_global_scale_torch,
+        wq=wq_torch,
+        w_scale_blocked=w_scales_torch_blocked,
+        w_global_scale=w_global_scale_torch,
         output_dtype=out_dtype,
     )
     breakpoint()
