@@ -13,6 +13,16 @@ from transformer_engine.pytorch.custom_recipes import quantization
 from transformer_engine.pytorch.custom_recipes import utils
 from transformer_engine.pytorch.quantized_tensor import QuantizedTensorStorage, Quantizer
 
+@dataclasses.dataclass
+class NVFP4TestOutputs:
+    qx: torch.Tensor
+    global_amax: torch.Tensor
+    blockwise_scales: torch.Tensor
+    global_encode_scale: torch.Tensor
+    global_decode_scale: torch.Tensor
+    quantized_decode_scales: torch.Tensor
+    dequantized_encode_scales: torch.Tensor
+    scaled_x: torch.Tensor
 
 def nvfp4_ref_rht_2d_quantizer_factory(role):
     """
@@ -473,6 +483,9 @@ class NVFP4QuantizerRef(Quantizer):
         FLOAT4_E2M1_MAX = torch.tensor(6.0, device=x.device, dtype=torch.float32)
         FLOAT8_E4M3_MAX = torch.tensor(448.0, device=x.device, dtype=torch.float32)
         decode_scale = torch.div(vec_max, FLOAT4_E2M1_MAX)
+        
+        if debug:
+            blockwise_scales = decode_scale.detach().clone()
 
         if pow_2_scales:
             decode_scale = cast_to_e8(decode_scale)
@@ -519,11 +532,21 @@ class NVFP4QuantizerRef(Quantizer):
 
         clipped_x = torch.clamp(scaled_x, -FLOAT4_E2M1_MAX, FLOAT4_E2M1_MAX).reshape(m, n)
 
-        outputs = [cast_to_fp4x2(clipped_x), decode_scale.squeeze(-1)]
+        qx = cast_to_fp4x2(clipped_x)
+        sx = decode_scale.squeeze(-1)
+
         if debug:
-            outputs += [scaled_x.reshape(m,n), encode_scale.squeeze(), clipped_x]
-        breakpoint()    
-        return outputs
+            return NVFP4TestOutputs(
+                qx=qx,
+                global_amax=global_amax,
+                blockwise_scales=blockwise_scales,
+                global_encode_scale=global_encode_scale,
+                global_decode_scale=global_decode_scale,
+                quantized_decode_scales=decode_scale.squeeze(-1),
+                dequantized_encode_scales=encode_scale
+            )     
+               
+        return qx, sx
     
     @staticmethod
     def _pad_tensor(

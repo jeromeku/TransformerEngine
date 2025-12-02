@@ -1,6 +1,7 @@
 import torch
 from torch.nn.functional import ScalingType, SwizzleType, scaled_mm
-
+from dataclasses import dataclass
+from transformer_engine.pytorch.custom_recipes.quantization_nvfp4 import NVFP4TestOutputs
 """
 Adapted from torch.testing._internal.common_quantized
 """
@@ -219,7 +220,7 @@ def torch_quantize_to_nvfp4(x, block_size: int = 16, cast_to_bfloat16: bool = Tr
     - Blockwise quantize inputs from HP -> FP4
     - Return quantized inputs, quantized (FP8) blockwise scales, and global scale factor (needed for decoding quantized blockwise scales)
     """
-
+    
     # Per-block-amax
     block_max = torch.amax(torch.abs(x), 1) + eps
 
@@ -257,13 +258,13 @@ def torch_quantize_to_nvfp4(x, block_size: int = 16, cast_to_bfloat16: bool = Tr
     x_fp4 = _float_to_float4_e2m1fn_x2(x.float())
 
     # fp4x2, fp8_e4m3, float respectively
-    return x, x_fp4, S_dec_b_e4m3, S_dec.float(), S_enc_b
-
-
-# def torch_native_quantize_fp4(x, block_size: int = 16):
-#     xq, x_scale, x_global_scale = data_to_nvfp4_with_global_scale(x, block_size)
-#     return xq, x_scale, x_global_scale
-
+    return NVFP4TestOutputs(qx=x_fp4.view(torch.uint8),
+                               global_amax=global_max,
+                               blockwise_scales=S_dec_b,
+                               global_encode_scale=S_enc,
+                               global_decode_scale=S_dec,
+                               quantized_decode_scales=S_dec_b_e4m3,
+                               dequantized_encode_scales=S_enc_b)
 
 # https://github.com/pytorch/pytorch/blob/a5436a5e8e4ee42d1debf52c2786c7ae0043a434/test/test_scaled_matmul_cuda.py#L1820
 def torch_native_nvfp4_gemm(

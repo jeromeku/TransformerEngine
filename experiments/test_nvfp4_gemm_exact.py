@@ -11,6 +11,7 @@ from transformer_engine.pytorch.custom_recipes.quantization_nvfp4 import (
     NVFP4QuantizerRef,
     cast_from_fp4x2,
     cast_to_fp4x2,
+    NVFP4TestOutputs
 )
 from transformer_engine.pytorch.custom_recipes import utils
 from torch_fp4_quant import (
@@ -20,8 +21,8 @@ from torch_fp4_quant import (
     torch_native_nvfp4_gemm,
     to_blocked,
 )
-
-
+from dataclasses import dataclass
+    
 def _cast_mx_to_float(t: torch.Tensor):
     return t.view(torch.uint8).float()
 
@@ -161,7 +162,7 @@ def check_nvfp4_gemm_versus_reference(
     breakpoint()
     assert global_amax_x.float().equal(x_nvfp4_ref.global_amax_row.reshape_as(global_amax_x))
 
-    debug_outputs = quantize_ref(
+    debug_outputs: NVFP4TestOutputs = quantize_ref(
         x,
         x_nvfp4_ref.global_amax_row,
         tile_len_x=16,
@@ -169,6 +170,11 @@ def check_nvfp4_gemm_versus_reference(
         pow_2_scales=False,
         debug=True,
     )
+
+    # sanity check
+    print(f"Sanity check, qx_ref: {mxfp_diff(qx_ref, debug_outputs.qx):.4f}")
+    print(f"Sanity check, sx_ref: {mxfp_diff(sx_ref, debug_outputs.sx):.4f}")
+
     breakpoint()
 
     x_fp4_scaled, xq_torch, x_scales_torch, x_global_scale_torch, x_encode_scale_torch = torch_quantize_to_nvfp4(
