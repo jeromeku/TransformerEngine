@@ -443,7 +443,10 @@ class NVFP4QuantizerRef(Quantizer):
         tile_len_y: int,
         *,
         pow_2_scales: bool,
-        eps: float,  # pylint: disable=unused-argument
+        eps: float = 0.0,  # pylint: disable=unused-argument,
+        return_x_scaled: bool = False,
+        return_clipped_x: bool = False,
+        return_encode_scale: bool = False
     ) -> Tuple[torch.Tensor, torch.Tensor]:
 
         assert x.ndim == 2
@@ -518,8 +521,16 @@ class NVFP4QuantizerRef(Quantizer):
 
         clipped_x = torch.clamp(scaled_x, -FLOAT4_E2M1_MAX, FLOAT4_E2M1_MAX).reshape(m, n)
 
-        return cast_to_fp4x2(clipped_x), decode_scale.squeeze(-1)
-
+        outputs = (cast_to_fp4x2(clipped_x), decode_scale.squeeze(-1),)
+        if return_x_scaled:
+            outputs += (scaled_x,)
+        if return_clipped_x:
+            outputs += (clipped_x,)
+        if return_encode_scale:
+            outputs += (encode_scale,)
+    
+        return outputs
+    
     @staticmethod
     def _pad_tensor(
         tensor: torch.Tensor, row_divisor: Optional[int], col_divisor: Optional[int]

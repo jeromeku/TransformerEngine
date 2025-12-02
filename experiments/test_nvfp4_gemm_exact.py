@@ -7,9 +7,33 @@ import transformer_engine.pytorch as te
 import transformer_engine_torch as tex
 from transformer_engine.pytorch.constants import TE_DType
 from transformer_engine.pytorch import NVFP4Quantizer
-from transformer_engine.pytorch.custom_recipes.quantization_nvfp4 import NVFP4QuantizerRef
+from transformer_engine.pytorch.custom_recipes.quantization_nvfp4 import (
+    NVFP4QuantizerRef,
+    cast_from_fp4x2,
+    cast_to_fp4x2,
+)
 from transformer_engine.pytorch.custom_recipes import utils
-from torch_fp4_quant import torch_quantize_to_nvfp4, FP4_MAX_VAL, FP8E4M3_MAX_VAL, torch_native_nvfp4_gemm, to_blocked
+from torch_fp4_quant import (
+    torch_quantize_to_nvfp4,
+    FP4_MAX_VAL,
+    FP8E4M3_MAX_VAL,
+    torch_native_nvfp4_gemm,
+    to_blocked,
+)
+
+
+def _cast_mx_to_float(t: torch.Tensor):
+    return t.view(torch.uint8).float()
+
+
+def mxfp_diff(t1: torch.Tensor, t2: torch.Tensor):
+    t1, t2 = map(_cast_mx_to_float, [t1, t2])
+    return t1.sub(t2).abs().max().item()
+
+
+def clamp_to_fp4(t: torch.Tensor):
+    return torch.clamp(t, -FP4_MAX_VAL, FP4_MAX_VAL)
+
 
 def check_nvfp4_gemm_versus_reference(
     x_dtype: torch.dtype,
@@ -116,27 +140,68 @@ def check_nvfp4_gemm_versus_reference(
         eps=0.0,
         quant_tile_shape=(1, 16),
     )
-    
+
     # Create reference quantized tensors needed by reference GEMM
     x_nvfp4_ref = ref_quantizer.quantize(x)
     w_nvfp4_ref = ref_quantizer.quantize(w)
-    
-    te_global_scale_x = x_nvfp4_ref.global_amax_row / (FP4_MAX_VAL * FP8E4M3_MAX_VAL)
-    te_scale_x = x_nvfp4_ref.scale
-    te_qx = x_nvfp4_ref.data
 
-    te_scale_diff = te_scale_x.float().sub(sx_trimmed.float()).abs().max().item()
+    global_scale_ref = x_nvfp4_ref.global_amax_row / (FP4_MAX_VAL * FP8E4M3_MAX_VAL)
+    sx_ref = x_nvfp4_ref.scale
+    qx_ref = x_nvfp4_ref.data
+
+    te_scale_diff = mxfp_diff(sx_ref, sx_trimmed)
     print(f"TE Scale diff: {te_scale_diff:.4f}")
-    te_qx_diff = qx_data.float().sub(te_qx.float()).abs().max().item()
+    te_qx_diff = mxfp_diff(qx_ref, qx_data)
     print(f"TE qx diff: {te_qx_diff:.4f}")
-    
+
+    # Repeat with extra returns
+    quantize_ref = NVFP4QuantizerRef._quantize_blockwise_reference
+    global_amax_x = torch.amax(torch.abs(x))
+    assert global_amax_x.equal(x_nvfp4_ref.global_amax_row)
+
+    *_, x_scaled_ref, x_clipped_x, x_encode_scale_ref = quantize_ref(
+        x,
+        global_amax_x,
+        tile_len_x=1,
+        tile_len_y=16,
+        pow_2_scales=False,
+        return_x_scaled=True,
+        return_clipped_x=True,
+        return_encode_scale=True,
+    )
+
+    x_fp4_scaled, xq_torch, x_scales_torch, x_global_scale_torch, x_encode_scale_torch = torch_quantize_to_nvfp4(
+        x, cast_to_bfloat16=False, eps=0.0
+    )
     breakpoint()
-    xq_torch, x_scales_torch, x_global_scale_torch = torch_quantize_to_nvfp4(x, cast_to_bfloat16=False, eps=0.0)
-    wq_torch, w_scales_torch, w_global_scale_torch = torch_quantize_to_nvfp4(w, cast_to_bfloat16=False, eps=0.0)
+    global_scale_diff = x_global_scale_torch.sub(global_scale_ref).abs().max()
+    print(f"TE vs Torch global scale diff: {global_scale_diff:.4f}")
+    qx_diff_torch = mxfp_diff(qx_ref, xq_torch)
+    print(f"TE vs Torch qx diff: {qx_diff_torch:.4f}")
+    x_fp4 = cast_to_fp4x2(x_fp4_scaled)
+    qx_diff_with_cast = mxfp_diff(qx_ref, x_fp4)
+    print(f"TE vs Torch qx cast diff: {qx_diff_with_cast:.4f}")
+
+    x_fp4_scaled, xq_torch, x_scales_torch, x_global_scale_torch = torch_quantize_to_nvfp4(
+        x, cast_to_bfloat16=True, eps=0.0
+    )
+    global_scale_diff = x_global_scale_torch.sub(global_scale_ref).abs().max()
+    print(f"TE vs Torch global scale diff: {global_scale_diff:.4f}")
+    qx_diff_torch = mxfp_diff(qx_ref, xq_torch)
+    print(f"TE vs Torch qx diff: {qx_diff_torch:.4f}")
+    x_fp4 = cast_to_fp4x2(x_fp4_scaled)
+    qx_diff_with_cast = mxfp_diff(qx_ref, x_fp4)
+    print(f"TE vs Torch qx cast diff: {qx_diff_with_cast:.4f}")
+
+    breakpoint()
+
+    wq_torch, w_scales_torch, w_global_scale_torch = torch_quantize_to_nvfp4(
+        w, cast_to_bfloat16=False, eps=0.0
+    )
 
     x_scales_torch_blocked = to_blocked(x_scales_torch)
     w_scales_torch_blocked = to_blocked(w_scales_torch)
-    
+
     # Check te vs torch
 
     global_scale_diff = x_global_scale_torch.sub(te_global_scale_x).abs().max()

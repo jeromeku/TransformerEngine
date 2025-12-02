@@ -257,7 +257,7 @@ def torch_quantize_to_nvfp4(x, block_size: int = 16, cast_to_bfloat16: bool = Tr
     x_fp4 = _float_to_float4_e2m1fn_x2(x.float())
 
     # fp4x2, fp8_e4m3, float respectively
-    return x_fp4, S_dec_b_e4m3, S_dec.float()
+    return x, x_fp4, S_dec_b_e4m3, S_dec.float(), S_enc_b
 
 
 # def torch_native_quantize_fp4(x, block_size: int = 16):
