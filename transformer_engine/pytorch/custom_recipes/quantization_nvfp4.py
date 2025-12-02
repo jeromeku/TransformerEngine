@@ -444,9 +444,7 @@ class NVFP4QuantizerRef(Quantizer):
         *,
         pow_2_scales: bool,
         eps: float = 0.0,  # pylint: disable=unused-argument,
-        return_x_scaled: bool = False,
-        return_clipped_x: bool = False,
-        return_encode_scale: bool = False
+        debug: bool = False
     ) -> Tuple[torch.Tensor, torch.Tensor]:
 
         assert x.ndim == 2
@@ -521,14 +519,10 @@ class NVFP4QuantizerRef(Quantizer):
 
         clipped_x = torch.clamp(scaled_x, -FLOAT4_E2M1_MAX, FLOAT4_E2M1_MAX).reshape(m, n)
 
-        outputs = (cast_to_fp4x2(clipped_x), decode_scale.squeeze(-1),)
-        if return_x_scaled:
-            outputs += (scaled_x,)
-        if return_clipped_x:
-            outputs += (clipped_x,)
-        if return_encode_scale:
-            outputs += (encode_scale,)
-    
+        outputs = [cast_to_fp4x2(clipped_x), decode_scale.squeeze(-1)]
+        if debug:
+            outputs += [scaled_x.reshape(m,n), encode_scale.squeeze(), clipped_x]
+        breakpoint()    
         return outputs
     
     @staticmethod

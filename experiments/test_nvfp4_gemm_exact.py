@@ -156,19 +156,20 @@ def check_nvfp4_gemm_versus_reference(
 
     # Repeat with extra returns
     quantize_ref = NVFP4QuantizerRef._quantize_blockwise_reference
-    global_amax_x = torch.amax(torch.abs(x))
-    assert global_amax_x.equal(x_nvfp4_ref.global_amax_row)
+    global_amax_x = torch.amax(torch.abs(x)).float()
 
-    *_, x_scaled_ref, x_clipped_x, x_encode_scale_ref = quantize_ref(
+    breakpoint()
+    assert global_amax_x.float().equal(x_nvfp4_ref.global_amax_row.reshape_as(global_amax_x))
+
+    debug_outputs = quantize_ref(
         x,
-        global_amax_x,
-        tile_len_x=1,
-        tile_len_y=16,
+        x_nvfp4_ref.global_amax_row,
+        tile_len_x=16,
+        tile_len_y=1,
         pow_2_scales=False,
-        return_x_scaled=True,
-        return_clipped_x=True,
-        return_encode_scale=True,
+        debug=True,
     )
+    breakpoint()
 
     x_fp4_scaled, xq_torch, x_scales_torch, x_global_scale_torch, x_encode_scale_torch = torch_quantize_to_nvfp4(
         x, cast_to_bfloat16=False, eps=0.0
