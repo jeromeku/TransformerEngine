@@ -204,8 +204,11 @@ def _float_to_float4_e2m1fn_x2(x):
 
 
 # https://github.com/pytorch/pytorch/blob/a5436a5e8e4ee42d1debf52c2786c7ae0043a434/test/test_scaled_matmul_cuda.py#L490
-def torch_quantize_to_nvfp4(x, block_size: int = 16, cast_to_bfloat16: bool = True, eps: float = 1e-12):
+def torch_quantize_to_nvfp4(x, block_size: int = 16, cast_to_float: bool = False, skip_bfloat16_cast_after_quant: bool = True, eps: float = 1e-12):
     # Simple (slow) reference implementation of NVFP4 two-level-scaling
+
+    if cast_to_float:
+        x = x.float()
 
     orig_shape = x.shape
     x = x.reshape(-1, block_size)
@@ -245,18 +248,21 @@ def torch_quantize_to_nvfp4(x, block_size: int = 16, cast_to_bfloat16: bool = Tr
     )  
 
     # scale & reshape input, reshape scales
-    x = (S_enc_b.unsqueeze(1) * x)
-    if cast_to_bfloat16:
-        x = x.bfloat16()
+    scaled_x = (S_enc_b.unsqueeze(1) * x)
+    
+    if not skip_bfloat16_cast_after_quant:
+        scaled_x = scaled_x.bfloat16()
     else:
-        assert x.dtype == torch.float32
+        assert scaled_x.dtype == torch.float32
 
-    x = x.reshape(orig_shape)
+    scaled_x = scaled_x.reshape(orig_shape)
     S_dec_b_e4m3 = S_dec_b_e4m3.reshape(orig_shape[0], -1)
+    
+    clipped_x = torch.clamp(scaled_x, -FP4_MAX_VAL, FP4_MAX_VAL)
 
     # cast input
     x_fp4 = _float_to_float4_e2m1fn_x2(x.float())
-
+    
     # fp4x2, fp8_e4m3, float respectively
     return NVFP4TestOutputs(qx=x_fp4.view(torch.uint8),
                                global_amax=global_max,
@@ -264,7 +270,9 @@ def torch_quantize_to_nvfp4(x, block_size: int = 16, cast_to_bfloat16: bool = Tr
                                global_encode_scale=S_enc,
                                global_decode_scale=S_dec,
                                quantized_decode_scales=S_dec_b_e4m3,
-                               dequantized_encode_scales=S_enc_b)
+                               dequantized_encode_scales=S_enc_b,
+                               scaled_x=scaled_x,
+                               clipped_x=clipped_x)
 
 # https://github.com/pytorch/pytorch/blob/a5436a5e8e4ee42d1debf52c2786c7ae0043a434/test/test_scaled_matmul_cuda.py#L1820
 def torch_native_nvfp4_gemm(

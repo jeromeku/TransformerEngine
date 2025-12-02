@@ -22,7 +22,8 @@ from torch_fp4_quant import (
     to_blocked,
 )
 from dataclasses import dataclass
-    
+
+
 def _cast_mx_to_float(t: torch.Tensor):
     return t.view(torch.uint8).float()
 
@@ -158,11 +159,9 @@ def check_nvfp4_gemm_versus_reference(
     # Repeat with extra returns
     quantize_ref = NVFP4QuantizerRef._quantize_blockwise_reference
     global_amax_x = torch.amax(torch.abs(x)).float()
-
-    breakpoint()
     assert global_amax_x.float().equal(x_nvfp4_ref.global_amax_row.reshape_as(global_amax_x))
 
-    debug_outputs: NVFP4TestOutputs = quantize_ref(
+    te_ref: NVFP4TestOutputs = quantize_ref(
         x,
         x_nvfp4_ref.global_amax_row,
         tile_len_x=16,
@@ -172,51 +171,54 @@ def check_nvfp4_gemm_versus_reference(
     )
 
     # sanity check
-    print(f"Sanity check, qx_ref: {mxfp_diff(qx_ref, debug_outputs.qx):.4f}")
-    print(f"Sanity check, sx_ref: {mxfp_diff(sx_ref, debug_outputs.sx):.4f}")
+    print(f"Sanity check, qx_ref: {mxfp_diff(qx_ref, te_ref.qx):.4f}")
+    print(f"Sanity check, sx_ref: {mxfp_diff(sx_ref, te_ref.quantized_decode_scales):.4f}")
 
-    breakpoint()
-
-    x_fp4_scaled, xq_torch, x_scales_torch, x_global_scale_torch, x_encode_scale_torch = torch_quantize_to_nvfp4(
-        x, cast_to_bfloat16=False, eps=0.0
+    torch_test: NVFP4TestOutputs = torch_quantize_to_nvfp4(
+        x, cast_to_float=True, skip_bfloat16_cast_after_quant=True, eps=0.0
     )
+    
+    for f in NVFP4TestOutputs.__dataclass_fields__:
+        ref, test = getattr(te_ref, f), getattr(torch_test, f)
+        print(f"{f}:")
+        
+        shapes = [ref.shape, test.shape]
+        dtypes = [ref.dtype, test.dtype]
+        print(f"{shapes=} {dtypes=}")
+        
+        if ref.shape != test.shape:
+            try:
+                test = test.reshape_as(ref)
+            except:
+                print(f"Shape mismatch {f}")
+                continue
+        
+        if ref.dtype != test.dtype:
+            print(f"Dtype mismatch: {f}")
+            test = test.to(ref.dtype)
+
+        if ref.dtype == torch.float32:
+            diff = ref.sub(test).abs().max().item()
+        else:
+            diff = mxfp_diff(ref, test)
+        
+        print(f"{diff=:.4f}")
+
     breakpoint()
-    global_scale_diff = x_global_scale_torch.sub(global_scale_ref).abs().max()
-    print(f"TE vs Torch global scale diff: {global_scale_diff:.4f}")
-    qx_diff_torch = mxfp_diff(qx_ref, xq_torch)
-    print(f"TE vs Torch qx diff: {qx_diff_torch:.4f}")
-    x_fp4 = cast_to_fp4x2(x_fp4_scaled)
-    qx_diff_with_cast = mxfp_diff(qx_ref, x_fp4)
-    print(f"TE vs Torch qx cast diff: {qx_diff_with_cast:.4f}")
+    # Manually cast torch scaled x to fp4
+    torch_x_fp4 = cast_to_fp4x2(torch_test.clipped_x)
+    fp4_diff = mxfp_diff(te_ref.qx, torch_x_fp4)
+    print(f"FP4 diff: {fp4_diff:.4f}")
 
-    x_fp4_scaled, xq_torch, x_scales_torch, x_global_scale_torch = torch_quantize_to_nvfp4(
-        x, cast_to_bfloat16=True, eps=0.0
-    )
-    global_scale_diff = x_global_scale_torch.sub(global_scale_ref).abs().max()
-    print(f"TE vs Torch global scale diff: {global_scale_diff:.4f}")
-    qx_diff_torch = mxfp_diff(qx_ref, xq_torch)
-    print(f"TE vs Torch qx diff: {qx_diff_torch:.4f}")
-    x_fp4 = cast_to_fp4x2(x_fp4_scaled)
-    qx_diff_with_cast = mxfp_diff(qx_ref, x_fp4)
-    print(f"TE vs Torch qx cast diff: {qx_diff_with_cast:.4f}")
 
     breakpoint()
+    
+    # breakpoint()
 
-    wq_torch, w_scales_torch, w_global_scale_torch = torch_quantize_to_nvfp4(
-        w, cast_to_bfloat16=False, eps=0.0
-    )
+    # x_scales_torch_blocked = to_blocked(x_scales_torch)
+    # w_scales_torch_blocked = to_blocked(w_scales_torch)
 
-    x_scales_torch_blocked = to_blocked(x_scales_torch)
-    w_scales_torch_blocked = to_blocked(w_scales_torch)
-
-    # Check te vs torch
-
-    global_scale_diff = x_global_scale_torch.sub(te_global_scale_x).abs().max()
-    print(f"TE vs Torch global scale diff: {global_scale_diff:.4f}")
-    qx_diff_torch = xq_torch.view(torch.uint8).float().sub(te_qx.float()).abs().max()
-    print(f"TE vs Torch qx diff: {qx_diff_torch:.4f}")
-    breakpoint()
-
+    return
     # Reference GEMM using quantizer's qgemm method
     y_ref = ref_quantizer.qgemm(
         qx=qx_data,
@@ -318,6 +320,7 @@ def test_nvfp4_gemm_versus_reference(
     accumulate: bool,
     is_x_columnwise: bool = False,
     is_w_columnwise: bool = False,
+    debug: bool = False
 ):
     check_nvfp4_gemm_versus_reference(
         x_dtype=x_dtype,
@@ -329,6 +332,7 @@ def test_nvfp4_gemm_versus_reference(
         accumulate=accumulate,
         x_columnwise=is_x_columnwise,
         w_columnwise=is_w_columnwise,
+        debug=debug
     )
 
 
@@ -337,6 +341,7 @@ if __name__ == "__main__":
     out_dtype = torch.float32
     M, N, K = 256, 1024, 512
     accumulate = True
+    debug = True
     test_nvfp4_gemm_versus_reference(
-        M, K, N, x_dtype=x_dtype, w_dtype=w_dtype, out_dtype=out_dtype, accumulate=accumulate
+        M, K, N, x_dtype=x_dtype, w_dtype=w_dtype, out_dtype=out_dtype, accumulate=accumulate, debug=True
     )

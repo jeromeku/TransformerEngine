@@ -23,6 +23,7 @@ class NVFP4TestOutputs:
     quantized_decode_scales: torch.Tensor
     dequantized_encode_scales: torch.Tensor
     scaled_x: torch.Tensor
+    clipped_x: torch.Tensor
 
 def nvfp4_ref_rht_2d_quantizer_factory(role):
     """
@@ -539,11 +540,13 @@ class NVFP4QuantizerRef(Quantizer):
             return NVFP4TestOutputs(
                 qx=qx,
                 global_amax=global_amax,
-                blockwise_scales=blockwise_scales,
+                blockwise_scales=blockwise_scales.squeeze(),
                 global_encode_scale=global_encode_scale,
                 global_decode_scale=global_decode_scale,
                 quantized_decode_scales=decode_scale.squeeze(-1),
-                dequantized_encode_scales=encode_scale
+                dequantized_encode_scales=encode_scale,
+                scaled_x=scaled_x,
+                clipped_x=clipped_x,
             )     
                
         return qx, sx
