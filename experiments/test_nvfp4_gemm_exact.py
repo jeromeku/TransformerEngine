@@ -279,7 +279,6 @@ def check_nvfp4_gemm_versus_reference(
     )
     check_quantized_outputs(ref_outputs=te_ref_x, test_outputs=torch_x)
 
-    breakpoint()
     
     """
     Note: use_te_max_norms is needed
@@ -312,7 +311,6 @@ def check_nvfp4_gemm_versus_reference(
     )
     check_quantized_outputs(ref_outputs=te_ref_w, test_outputs=torch_w)
 
-    breakpoint()
     x_scales_torch_blocked = to_blocked(torch_x.quantized_decode_scales)
     w_scales_torch_blocked = to_blocked(torch_w.quantized_decode_scales)
 
@@ -332,7 +330,6 @@ def check_nvfp4_gemm_versus_reference(
         qresult_w=w_nvfp4_ref,
     )
 
-    breakpoint()
     torch_ref = torch_native_nvfp4_gemm(
         xq=torch_x.qx.view(torch.float4_e2m1fn_x2),
         x_scale_blocked=x_scales_torch_blocked,
@@ -342,7 +339,7 @@ def check_nvfp4_gemm_versus_reference(
         w_global_scale=torch_w.global_decode_scale.float(),
         output_dtype=out_dtype,
     )
-    breakpoint()
+
     diff = (torch_ref - y_ref).abs().max()
     print(f"Torch scale_mm vs TE Ref: {diff.cpu().item():.4f}")
 
