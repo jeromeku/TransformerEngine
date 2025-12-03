@@ -59,6 +59,74 @@ def clamp_to_fp4(t: torch.Tensor):
     return torch.clamp(t, -FP4_MAX_VAL, FP4_MAX_VAL)
 
 
+def check_quantized_outputs(ref_outputs: NVFP4TestOutputs, test_outputs: NVFP4TestOutputs, precision: int = 8):
+    float_fmt = f".{precision}f"
+    for f in NVFP4TestOutputs.__dataclass_fields__:
+        ref, test = getattr(ref_outputs, f), getattr(test_outputs, f)
+        print(f"{f}:")
+
+        shapes = [ref.shape, test.shape]
+        dtypes = [ref.dtype, test.dtype]
+        print(f"{shapes=} {dtypes=}")
+
+        if ref.shape != test.shape:
+            try:
+                test = test.reshape_as(ref)
+            except:
+                print(f"Shape mismatch {f}")
+                continue
+
+        if ref.dtype != test.dtype:
+            print(f"Dtype mismatch: {f}")
+            test = test.to(ref.dtype)
+
+        if ref.dtype == torch.float32:
+            diff = ref.sub(test).abs().max().item()
+        else:
+            diff = mxfp_diff(ref, test)
+
+        print(f"{diff=:{float_fmt}}")
+
+    breakpoint()
+
+    # # Manually cast torch scaled x to fp4
+    # torch_x_fp4 = cast_to_fp4x2(torch_x.clipped_x)
+    # # Sanity check
+    # te_fp4_check = cast_to_fp4x2(te_ref.clipped_x)
+    # assert te_fp4_check.equal(te_ref.qx)
+
+    # Unpack so that each fp4 lives in its own uint8
+    unpacked_fp4_ref = unpack_fp4(ref_outputs.qx)
+    unpacked_fp4_test = unpack_fp4(test_outputs.qx)
+
+    mismatches = unpacked_fp4_ref != unpacked_fp4_test
+    print(f"Num mismatches after fp4 cast: {torch.sum(mismatches).item()}")
+
+    dq_ref = cast_from_fp4x2(ref_outputs.qx, torch.float32)
+    dq_test = cast_from_fp4x2(test_outputs.qx, torch.float32)
+    print(f"dqx diff: {dq_ref.sub(dq_test).abs().max().item():{float_fmt}}")
+
+    # if mismatches > 0:
+    #     ridx, cidx = torch.where(mismatches)
+    #     idx = torch.nonzero(mismatches)
+
+    #     # Num bits for E2M1
+    #     EBITS = 2
+    #     MBITS = 1
+    #     breakpoint()
+    #     torch_x_fp4_bitcast = _f32_to_floatx_unpacked(torch_test.scaled_x, EBITS, MBITS)
+    #     te_x_fp4_bitcast = _f32_to_floatx_unpacked(te_ref.scaled_x, EBITS, MBITS)
+    #     fp4_diff_bitcast = mxfp_diff(torch_x_fp4_bitcast, te_x_fp4_bitcast)
+    #     print(f"Bitcast fp4 diff: {fp4_diff_bitcast:{float_fmt}}")
+
+    #     # Sanity check
+    #     breakpoint()
+    #     unpacked_torch_bitcast_fp4 = unpack_fp4(torch_test.qx)
+    #     torch_check = mxfp_diff(torch_x_fp4_bitcast, unpacked_torch_bitcast_fp4)
+    #     print(f"Torch unpacked bitcast fp4 check: {torch_check:{float_fmt}}")
+
+
+
 def check_nvfp4_gemm_versus_reference(
     x_dtype: torch.dtype,
     w_dtype: torch.dtype,
@@ -176,6 +244,9 @@ def check_nvfp4_gemm_versus_reference(
     sx_ref = x_nvfp4_ref.scale
     qx_ref = x_nvfp4_ref.data
 
+    sw_ref = w_nvfp4_ref.scale
+    wx_ref = x_nvfp4_ref.data
+
     te_scale_diff = mxfp_diff(sx_ref, sx_trimmed)
     print(f"TE Scale diff: {te_scale_diff:{float_fmt}}")
     te_qx_diff = mxfp_diff(qx_ref, qx_data)
@@ -186,7 +257,7 @@ def check_nvfp4_gemm_versus_reference(
     global_amax_x = torch.amax(torch.abs(x)).float()
     assert global_amax_x.float().equal(x_nvfp4_ref.global_amax_row.reshape_as(global_amax_x))
 
-    te_ref: NVFP4TestOutputs = quantize_ref(
+    te_ref_x: NVFP4TestOutputs = quantize_ref(
         x,
         x_nvfp4_ref.global_amax_row,
         tile_len_x=16,
@@ -194,86 +265,35 @@ def check_nvfp4_gemm_versus_reference(
         pow_2_scales=False,
         debug=True,
     )
-
+    te_ref_w: NVFP4TestOutputs = quantize_ref(
+        w,
+        w_nvfp4_ref.global_amax_row,
+        tile_len_x=16,
+        tile_len_y=1,
+        pow_2_scales=False,
+        debug=True
+    )
     # sanity check
-    print(f"Sanity check, qx_ref: {mxfp_diff(qx_ref, te_ref.qx):.4f}")
-    print(f"Sanity check, sx_ref: {mxfp_diff(sx_ref, te_ref.quantized_decode_scales):.4f}")
+    print(f"Sanity check, qx_ref: {mxfp_diff(qx_ref, te_ref_x.qx):.4f}")
+    print(f"Sanity check, sx_ref: {mxfp_diff(sx_ref, te_ref_x.quantized_decode_scales):.4f}")
+    print(f"Sanity check, wx_ref: {mxfp_diff(wx_ref, te_ref_w.qx):.4f}")
+    print(f"Sanity check, sw_ref: {mxfp_diff(sw_ref, te_ref_w.quantized_decode_scales):.4f}")
 
-    torch_test: NVFP4TestOutputs = torch_quantize_to_nvfp4(
+    breakpoint()
+    torch_x: NVFP4TestOutputs = torch_quantize_to_nvfp4(
         x, cast_to_float=True, skip_bfloat16_cast_after_quant=True, invert_encode_scale=True
     )
-
-    for f in NVFP4TestOutputs.__dataclass_fields__:
-        ref, test = getattr(te_ref, f), getattr(torch_test, f)
-        print(f"{f}:")
-
-        shapes = [ref.shape, test.shape]
-        dtypes = [ref.dtype, test.dtype]
-        print(f"{shapes=} {dtypes=}")
-
-        if ref.shape != test.shape:
-            try:
-                test = test.reshape_as(ref)
-            except:
-                print(f"Shape mismatch {f}")
-                continue
-
-        if ref.dtype != test.dtype:
-            print(f"Dtype mismatch: {f}")
-            test = test.to(ref.dtype)
-
-        if ref.dtype == torch.float32:
-            diff = ref.sub(test).abs().max().item()
-        else:
-            diff = mxfp_diff(ref, test)
-
-        print(f"{diff=:{float_fmt}}")
+    check_quantized_outputs(ref_outputs=te_ref_x, test_outputs=torch_x)
 
     breakpoint()
-    encode_scale_check = torch.div(
-        1, torch_test.global_decode_scale * torch_test.quantized_decode_scales.float()
+    torch_w: NVFP4TestOutputs = torch_quantize_to_nvfp4(
+        x, cast_to_float=True, skip_bfloat16_cast_after_quant=True, invert_encode_scale=True
     )
-
-    # Manually cast torch scaled x to fp4
-    torch_x_fp4 = cast_to_fp4x2(torch_test.clipped_x)
-    # Sanity check
-    te_fp4_check = cast_to_fp4x2(te_ref.clipped_x)
-    assert te_fp4_check.equal(te_ref.qx)
-
-    # Unpack so that each fp4 lives in its own uint8
-    unpacked_te_fp4 = unpack_fp4(te_ref.qx)
-    unpacked_torch_fp4 = unpack_fp4(torch_x_fp4)
-
-    mismatches = unpacked_torch_fp4 != unpacked_te_fp4
-    print(f"Num mismatches after fp4 cast: {torch.sum(mismatches).item()}")
-
-    ridx, cidx = torch.where(mismatches)
-    idx = torch.nonzero(mismatches)
-
-    # Num bits for E2M1
-    EBITS = 2
-    MBITS = 1
-    breakpoint()
-    torch_x_fp4_bitcast = _f32_to_floatx_unpacked(torch_test.scaled_x, EBITS, MBITS)
-    te_x_fp4_bitcast = _f32_to_floatx_unpacked(te_ref.scaled_x, EBITS, MBITS)
-    fp4_diff_bitcast = mxfp_diff(torch_x_fp4_bitcast, te_x_fp4_bitcast)
-    print(f"Bitcast fp4 diff: {fp4_diff_bitcast:{float_fmt}}")
-
-    # Sanity check
-    breakpoint()
-    unpacked_torch_bitcast_fp4 = unpack_fp4(torch_test.qx)
-    torch_check = mxfp_diff(torch_x_fp4_bitcast, unpacked_torch_bitcast_fp4)
-    print(f"Torch unpacked bitcast fp4 check: {torch_check:{float_fmt}}")
-
-    te_dq = cast_from_fp4x2(te_ref.qx, torch.float32)
-    torch_dq = cast_from_fp4x2(torch_x_fp4, torch.float32)
-    print(f"dqx diff: {te_dq.sub(torch_dq).abs().max().item():{float_fmt}}")
+    check_quantized_outputs(ref_outputs=te_ref_w, test_outputs=torch_w)
 
     breakpoint()
-    return
-
-    x_scales_torch_blocked = to_blocked(torch_test.quantized_decode_scales)
-    w_scales_torch_blocked = to_blocked(torch_test.quantized_decode_scales)
+    x_scales_torch_blocked = to_blocked(torch_x.quantized_decode_scales)
+    w_scales_torch_blocked = to_blocked(torch_w.quantized_decode_scales)
 
     # Reference GEMM using quantizer's qgemm method
     y_ref = ref_quantizer.qgemm(
