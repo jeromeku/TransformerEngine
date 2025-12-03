@@ -59,7 +59,9 @@ def clamp_to_fp4(t: torch.Tensor):
     return torch.clamp(t, -FP4_MAX_VAL, FP4_MAX_VAL)
 
 
-def check_quantized_outputs(ref_outputs: NVFP4TestOutputs, test_outputs: NVFP4TestOutputs, precision: int = 8):
+def check_quantized_outputs(
+    ref_outputs: NVFP4TestOutputs, test_outputs: NVFP4TestOutputs, precision: int = 8
+):
     float_fmt = f".{precision}f"
     for f in NVFP4TestOutputs.__dataclass_fields__:
         ref, test = getattr(ref_outputs, f), getattr(test_outputs, f)
@@ -86,8 +88,6 @@ def check_quantized_outputs(ref_outputs: NVFP4TestOutputs, test_outputs: NVFP4Te
             diff = mxfp_diff(ref, test)
 
         print(f"{diff=:{float_fmt}}")
-
-    breakpoint()
 
     # # Manually cast torch scaled x to fp4
     # torch_x_fp4 = cast_to_fp4x2(torch_x.clipped_x)
@@ -126,7 +126,6 @@ def check_quantized_outputs(ref_outputs: NVFP4TestOutputs, test_outputs: NVFP4Te
     #     print(f"Torch unpacked bitcast fp4 check: {torch_check:{float_fmt}}")
 
 
-
 def check_nvfp4_gemm_versus_reference(
     x_dtype: torch.dtype,
     w_dtype: torch.dtype,
@@ -155,6 +154,9 @@ def check_nvfp4_gemm_versus_reference(
     w_shape = (K, N) if w_columnwise else (N, K)
     x = torch.randn(x_shape, dtype=x_dtype, device=device)
     w = torch.randn(w_shape, dtype=w_dtype, device=device)
+
+    TE_FP4_MAX_VAL = torch.tensor(6.0, device=device, dtype=torch.float32)
+    TE_FP8_E4M3_MAX_VAL  = torch.tensor(448.0, device=device, dtype=torch.float32)
 
     # Setup out tensor if accumulate is True
     if accumulate:
@@ -238,14 +240,12 @@ def check_nvfp4_gemm_versus_reference(
 
     # Create reference quantized tensors needed by reference GEMM
     x_nvfp4_ref = ref_quantizer.quantize(x)
-    w_nvfp4_ref = ref_quantizer.quantize(w)
-
-    global_scale_ref = x_nvfp4_ref.global_amax_row / (FP4_MAX_VAL * FP8E4M3_MAX_VAL)
-    sx_ref = x_nvfp4_ref.scale
     qx_ref = x_nvfp4_ref.data
+    sx_ref = x_nvfp4_ref.scale
 
+    w_nvfp4_ref = ref_quantizer.quantize(w)
     sw_ref = w_nvfp4_ref.scale
-    wx_ref = x_nvfp4_ref.data
+    wx_ref = w_nvfp4_ref.data
 
     te_scale_diff = mxfp_diff(sx_ref, sx_trimmed)
     print(f"TE Scale diff: {te_scale_diff:{float_fmt}}")
@@ -266,12 +266,7 @@ def check_nvfp4_gemm_versus_reference(
         debug=True,
     )
     te_ref_w: NVFP4TestOutputs = quantize_ref(
-        w,
-        w_nvfp4_ref.global_amax_row,
-        tile_len_x=16,
-        tile_len_y=1,
-        pow_2_scales=False,
-        debug=True
+        w, w_nvfp4_ref.global_amax_row, tile_len_x=16, tile_len_y=1, pow_2_scales=False, debug=True
     )
     # sanity check
     print(f"Sanity check, qx_ref: {mxfp_diff(qx_ref, te_ref_x.qx):.4f}")
@@ -279,15 +274,41 @@ def check_nvfp4_gemm_versus_reference(
     print(f"Sanity check, wx_ref: {mxfp_diff(wx_ref, te_ref_w.qx):.4f}")
     print(f"Sanity check, sw_ref: {mxfp_diff(sw_ref, te_ref_w.quantized_decode_scales):.4f}")
 
-    breakpoint()
     torch_x: NVFP4TestOutputs = torch_quantize_to_nvfp4(
         x, cast_to_float=True, skip_bfloat16_cast_after_quant=True, invert_encode_scale=True
     )
     check_quantized_outputs(ref_outputs=te_ref_x, test_outputs=torch_x)
 
     breakpoint()
+    
+    """
+    Note: use_te_max_norms is needed
+    
+    from torch_fp4_quant import FP4_MAX_VAL, FP8E4M3_MAX_VAL
+    import numpy as np
+
+    assert isinstance(FP4_MAX_VAL, float)
+    assert isinstance(np.float64(FP4_MAX_VAL), float)
+
+    Python's float is a C++ double (float64)
+
+    TE explicitly constructs torch float32 scalars for these max norms whereas
+    the pytorch test suite uses python builtin floats to represent these max norms.
+
+    This results in small diffs when calculating scale factors, which compounds during quantization
+    and results in catastrophic mismatches upon casting to fp4.
+
+    Setting `use_te_max_norms=True` uses TE's numeric representation of max norms, which addresses these
+    mismatches. 
+    """
+    
     torch_w: NVFP4TestOutputs = torch_quantize_to_nvfp4(
-        x, cast_to_float=True, skip_bfloat16_cast_after_quant=True, invert_encode_scale=True
+        w,
+        cast_to_float=True,
+        skip_bfloat16_cast_after_quant=True,
+        invert_encode_scale=True,
+        clamp_encode_scales=True,
+        use_te_max_norms=True,
     )
     check_quantized_outputs(ref_outputs=te_ref_w, test_outputs=torch_w)
 
