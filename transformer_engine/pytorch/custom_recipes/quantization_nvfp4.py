@@ -17,6 +17,7 @@ from transformer_engine.pytorch.quantized_tensor import QuantizedTensorStorage, 
 class NVFP4TestOutputs:
     qx: torch.Tensor
     global_amax: torch.Tensor
+    blockwise_maxes: torch.Tensor
     blockwise_scales: torch.Tensor
     global_encode_scale: torch.Tensor
     global_decode_scale: torch.Tensor
@@ -487,6 +488,7 @@ class NVFP4QuantizerRef(Quantizer):
         
         if debug:
             blockwise_scales = decode_scale.detach().clone()
+            blockwise_maxes = vec_max.squeeze()
 
         if pow_2_scales:
             decode_scale = cast_to_e8(decode_scale)
@@ -544,9 +546,10 @@ class NVFP4QuantizerRef(Quantizer):
                 global_encode_scale=global_encode_scale,
                 global_decode_scale=global_decode_scale,
                 quantized_decode_scales=decode_scale.squeeze(-1),
-                dequantized_encode_scales=encode_scale,
-                scaled_x=scaled_x,
+                dequantized_encode_scales=encode_scale.squeeze(),
+                scaled_x=scaled_x.reshape(m, n),
                 clipped_x=clipped_x,
+                blockwise_maxes=blockwise_maxes
             )     
                
         return qx, sx

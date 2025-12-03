@@ -11,7 +11,7 @@ from transformer_engine.pytorch.custom_recipes.quantization_nvfp4 import (
     NVFP4QuantizerRef,
     cast_from_fp4x2,
     cast_to_fp4x2,
-    NVFP4TestOutputs
+    NVFP4TestOutputs,
 )
 from transformer_engine.pytorch.custom_recipes import utils
 from torch_fp4_quant import (
@@ -20,8 +20,30 @@ from torch_fp4_quant import (
     FP8E4M3_MAX_VAL,
     torch_native_nvfp4_gemm,
     to_blocked,
+    _f32_to_floatx_unpacked,
 )
 from dataclasses import dataclass
+
+
+def unpack_fp4(t: torch.Tensor):
+    """
+    Unpacked packed fp4s
+
+    Assumes low nibble encodes even elements, upper nibble encodes odd elements
+    """
+    assert t.dtype == torch.uint8
+    assert t.ndim == 2
+    rows, cols = t.shape
+    result = torch.zeros(rows, cols * 2, dtype=torch.uint8, device=t.device)
+
+    # Extract nibbles
+    evens = t & 0xF
+    odds = t >> 4
+
+    result[:, ::2] = evens
+    result[:, 1::2] = odds
+
+    return result
 
 
 def _cast_mx_to_float(t: torch.Tensor):
@@ -48,7 +70,10 @@ def check_nvfp4_gemm_versus_reference(
     *,
     x_columnwise: bool = False,
     w_columnwise: bool = False,
+    precision: int = 8,
+    debug: bool = False,
 ):
+    float_fmt = f".{precision}f"
     te_dtype = tex.DType.kFloat4E2M1
 
     # Setup device and random seed
@@ -98,7 +123,7 @@ def check_nvfp4_gemm_versus_reference(
         w_shape, dtype=w_dtype, device=device, requires_grad=False
     )
     w_nvfp4_native = w_quantizer.update_quantized(w, w_nvfp4_native)
-    breakpoint()
+
     # Extract quantized data from native NVFP4Tensors
     qx_data = (
         x_nvfp4_native._columnwise_data.view(dtype=torch.uint8)
@@ -152,9 +177,9 @@ def check_nvfp4_gemm_versus_reference(
     qx_ref = x_nvfp4_ref.data
 
     te_scale_diff = mxfp_diff(sx_ref, sx_trimmed)
-    print(f"TE Scale diff: {te_scale_diff:.4f}")
+    print(f"TE Scale diff: {te_scale_diff:{float_fmt}}")
     te_qx_diff = mxfp_diff(qx_ref, qx_data)
-    print(f"TE qx diff: {te_qx_diff:.4f}")
+    print(f"TE qx diff: {te_qx_diff:{float_fmt}}")
 
     # Repeat with extra returns
     quantize_ref = NVFP4QuantizerRef._quantize_blockwise_reference
@@ -175,24 +200,24 @@ def check_nvfp4_gemm_versus_reference(
     print(f"Sanity check, sx_ref: {mxfp_diff(sx_ref, te_ref.quantized_decode_scales):.4f}")
 
     torch_test: NVFP4TestOutputs = torch_quantize_to_nvfp4(
-        x, cast_to_float=True, skip_bfloat16_cast_after_quant=True, eps=0.0
+        x, cast_to_float=True, skip_bfloat16_cast_after_quant=True, invert_encode_scale=True
     )
-    
+
     for f in NVFP4TestOutputs.__dataclass_fields__:
         ref, test = getattr(te_ref, f), getattr(torch_test, f)
         print(f"{f}:")
-        
+
         shapes = [ref.shape, test.shape]
         dtypes = [ref.dtype, test.dtype]
         print(f"{shapes=} {dtypes=}")
-        
+
         if ref.shape != test.shape:
             try:
                 test = test.reshape_as(ref)
             except:
                 print(f"Shape mismatch {f}")
                 continue
-        
+
         if ref.dtype != test.dtype:
             print(f"Dtype mismatch: {f}")
             test = test.to(ref.dtype)
@@ -201,24 +226,55 @@ def check_nvfp4_gemm_versus_reference(
             diff = ref.sub(test).abs().max().item()
         else:
             diff = mxfp_diff(ref, test)
-        
-        print(f"{diff=:.4f}")
+
+        print(f"{diff=:{float_fmt}}")
 
     breakpoint()
+    encode_scale_check = torch.div(
+        1, torch_test.global_decode_scale * torch_test.quantized_decode_scales.float()
+    )
+
     # Manually cast torch scaled x to fp4
     torch_x_fp4 = cast_to_fp4x2(torch_test.clipped_x)
-    fp4_diff = mxfp_diff(te_ref.qx, torch_x_fp4)
-    print(f"FP4 diff: {fp4_diff:.4f}")
+    # Sanity check
+    te_fp4_check = cast_to_fp4x2(te_ref.clipped_x)
+    assert te_fp4_check.equal(te_ref.qx)
 
+    # Unpack so that each fp4 lives in its own uint8
+    unpacked_te_fp4 = unpack_fp4(te_ref.qx)
+    unpacked_torch_fp4 = unpack_fp4(torch_x_fp4)
+
+    mismatches = unpacked_torch_fp4 != unpacked_te_fp4
+    print(f"Num mismatches after fp4 cast: {torch.sum(mismatches).item()}")
+
+    ridx, cidx = torch.where(mismatches)
+    idx = torch.nonzero(mismatches)
+
+    # Num bits for E2M1
+    EBITS = 2
+    MBITS = 1
+    breakpoint()
+    torch_x_fp4_bitcast = _f32_to_floatx_unpacked(torch_test.scaled_x, EBITS, MBITS)
+    te_x_fp4_bitcast = _f32_to_floatx_unpacked(te_ref.scaled_x, EBITS, MBITS)
+    fp4_diff_bitcast = mxfp_diff(torch_x_fp4_bitcast, te_x_fp4_bitcast)
+    print(f"Bitcast fp4 diff: {fp4_diff_bitcast:{float_fmt}}")
+
+    # Sanity check
+    breakpoint()
+    unpacked_torch_bitcast_fp4 = unpack_fp4(torch_test.qx)
+    torch_check = mxfp_diff(torch_x_fp4_bitcast, unpacked_torch_bitcast_fp4)
+    print(f"Torch unpacked bitcast fp4 check: {torch_check:{float_fmt}}")
+
+    te_dq = cast_from_fp4x2(te_ref.qx, torch.float32)
+    torch_dq = cast_from_fp4x2(torch_x_fp4, torch.float32)
+    print(f"dqx diff: {te_dq.sub(torch_dq).abs().max().item():{float_fmt}}")
 
     breakpoint()
-    
-    # breakpoint()
-
-    # x_scales_torch_blocked = to_blocked(x_scales_torch)
-    # w_scales_torch_blocked = to_blocked(w_scales_torch)
-
     return
+
+    x_scales_torch_blocked = to_blocked(torch_test.quantized_decode_scales)
+    w_scales_torch_blocked = to_blocked(torch_test.quantized_decode_scales)
+
     # Reference GEMM using quantizer's qgemm method
     y_ref = ref_quantizer.qgemm(
         qx=qx_data,
@@ -320,7 +376,7 @@ def test_nvfp4_gemm_versus_reference(
     accumulate: bool,
     is_x_columnwise: bool = False,
     is_w_columnwise: bool = False,
-    debug: bool = False
+    debug: bool = False,
 ):
     check_nvfp4_gemm_versus_reference(
         x_dtype=x_dtype,
@@ -332,7 +388,7 @@ def test_nvfp4_gemm_versus_reference(
         accumulate=accumulate,
         x_columnwise=is_x_columnwise,
         w_columnwise=is_w_columnwise,
-        debug=debug
+        debug=debug,
     )
 
 
@@ -343,5 +399,12 @@ if __name__ == "__main__":
     accumulate = True
     debug = True
     test_nvfp4_gemm_versus_reference(
-        M, K, N, x_dtype=x_dtype, w_dtype=w_dtype, out_dtype=out_dtype, accumulate=accumulate, debug=True
+        M,
+        K,
+        N,
+        x_dtype=x_dtype,
+        w_dtype=w_dtype,
+        out_dtype=out_dtype,
+        accumulate=accumulate,
+        debug=True,
     )

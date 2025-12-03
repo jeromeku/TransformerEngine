@@ -2,6 +2,7 @@ import torch
 from torch.nn.functional import ScalingType, SwizzleType, scaled_mm
 from dataclasses import dataclass
 from transformer_engine.pytorch.custom_recipes.quantization_nvfp4 import NVFP4TestOutputs
+
 """
 Adapted from torch.testing._internal.common_quantized
 """
@@ -22,8 +23,10 @@ FP8E4M3_MAX_VAL = torch.finfo(torch.float8_e4m3fn).max
 
 EBITS_F32, MBITS_F32 = 8, 23
 
+
 def ceil_div(a, b):
     return (a + b - 1) // b
+
 
 def to_blocked(input_matrix) -> torch.Tensor:
     """
@@ -49,7 +52,9 @@ def to_blocked(input_matrix) -> torch.Tensor:
     padded = input_matrix
     # Ideally we would use torch.nn.pad but it doesn't support float8_e8m0fnu for now
     if (rows, cols) != (padded_rows, padded_cols):
-        padded = torch.zeros((padded_rows, padded_cols), device=input_matrix.device, dtype=input_matrix.dtype)
+        padded = torch.zeros(
+            (padded_rows, padded_cols), device=input_matrix.device, dtype=input_matrix.dtype
+        )
         padded[:rows, :cols] = input_matrix
 
     # Rearrange the blocks
@@ -196,7 +201,7 @@ def pack_uint4(uint8_data) -> torch.Tensor:
 
 
 def _float_to_float4_e2m1fn_x2(x):
-#    assert x.dtype == torch.bfloat16
+    #    assert x.dtype == torch.bfloat16
     x = _f32_to_floatx_unpacked(x, FP4_EBITS, FP4_MBITS)
     x = pack_uint4(x)
     x = x.view(torch.float4_e2m1fn_x2)
@@ -204,11 +209,21 @@ def _float_to_float4_e2m1fn_x2(x):
 
 
 # https://github.com/pytorch/pytorch/blob/a5436a5e8e4ee42d1debf52c2786c7ae0043a434/test/test_scaled_matmul_cuda.py#L490
-def torch_quantize_to_nvfp4(x, block_size: int = 16, cast_to_float: bool = False, skip_bfloat16_cast_after_quant: bool = True, eps: float = 1e-12):
+# eps = 1e-12
+def torch_quantize_to_nvfp4(
+    x,
+    block_size: int = 16,
+    cast_to_float: bool = False,
+    skip_bfloat16_cast_after_quant: bool = True,
+    eps: float = None,
+    use_te_max_norms: bool = False,
+    clamp_encode_scales: bool = False,
+    invert_encode_scale: bool = False
+):
     # Simple (slow) reference implementation of NVFP4 two-level-scaling
 
-    if cast_to_float:
-        x = x.float()
+    # if cast_to_float:
+    #     x = x.float()
 
     orig_shape = x.shape
     x = x.reshape(-1, block_size)
@@ -223,33 +238,64 @@ def torch_quantize_to_nvfp4(x, block_size: int = 16, cast_to_float: bool = False
     - Blockwise quantize inputs from HP -> FP4
     - Return quantized inputs, quantized (FP8) blockwise scales, and global scale factor (needed for decoding quantized blockwise scales)
     """
-    
+
     # Per-block-amax
-    block_max = torch.amax(torch.abs(x), 1) + eps
+    block_max = torch.amax(torch.abs(x), 1)
+
+    # match te impl
+    if cast_to_float:
+        block_max = block_max.float()
+
+    if eps is not None:
+        block_max += eps
 
     # Per-tensor max
+    if cast_to_float:
+        x = x.float()
+
     global_max = x.abs().max()
 
     # Constants
     # Global encoding scale for block-scales
-    S_enc = FP4_MAX_VAL * FP8E4M3_MAX_VAL / global_max
+    if use_te_max_norms:
+        fp4_max = torch.tensor(6.0, device=x.device, dtype=torch.float32)
+        fp8_e4m3_max = torch.tensor(448.0, device=x.device, dtype=torch.float32)
+    else:
+        fp4_max = FP4_MAX_VAL
+        fp8_e4m3_max = FP8E4M3_MAX_VAL
+
+    S_enc = fp4_max * fp8_e4m3_max / global_max
     S_dec = 1.0 / S_enc
 
     # Per-block decode-scale
-    S_dec_b = block_max / FP4_MAX_VAL
+    S_dec_b = block_max / fp4_max
 
     # Stored scaled-e4m3 per-block decode scales
     S_dec_b_e4m3 = (S_dec_b * S_enc).to(torch.float8_e4m3fn)
 
     # Actual per-block encoding scale - dequantize the fp8 quantized block scales
     # = 1 / (S_dec * S_dec_b_e4m3) where S_dec dequantizes scales from FP8 -> FP32
-    S_enc_b = (
-        S_enc / S_dec_b_e4m3.float()
-    )  
+    
+    # Match TE impl by clamping to fp32 max
+    if invert_encode_scale:
+        S_enc_b = torch.div(1, S_dec_b_e4m3.float() * S_dec)
+    else:
+        S_enc_b = S_enc / S_dec_b_e4m3.float()
+
+    if clamp_encode_scales:
+        S_enc_b = torch.min(S_enc_b, 
+                        torch.tensor(
+                        torch.finfo(torch.float32).max,
+                        device=S_enc_b.device,
+                        dtype=torch.float32,
+                    ))
+    # Cast x to float before encoding to match TE impl
+    # if cast_to_float:
+    #     x = x.float()
 
     # scale & reshape input, reshape scales
-    scaled_x = (S_enc_b.unsqueeze(1) * x)
-    
+    scaled_x = S_enc_b.unsqueeze(1) * x
+
     if not skip_bfloat16_cast_after_quant:
         scaled_x = scaled_x.bfloat16()
     else:
@@ -257,28 +303,31 @@ def torch_quantize_to_nvfp4(x, block_size: int = 16, cast_to_float: bool = False
 
     scaled_x = scaled_x.reshape(orig_shape)
     S_dec_b_e4m3 = S_dec_b_e4m3.reshape(orig_shape[0], -1)
-    
+
     clipped_x = torch.clamp(scaled_x, -FP4_MAX_VAL, FP4_MAX_VAL)
 
     # cast input
-    x_fp4 = _float_to_float4_e2m1fn_x2(x.float())
-    
+    x_fp4 = _float_to_float4_e2m1fn_x2(scaled_x.float())
+
     # fp4x2, fp8_e4m3, float respectively
-    return NVFP4TestOutputs(qx=x_fp4.view(torch.uint8),
-                               global_amax=global_max,
-                               blockwise_scales=S_dec_b,
-                               global_encode_scale=S_enc,
-                               global_decode_scale=S_dec,
-                               quantized_decode_scales=S_dec_b_e4m3,
-                               dequantized_encode_scales=S_enc_b,
-                               scaled_x=scaled_x,
-                               clipped_x=clipped_x)
+    return NVFP4TestOutputs(
+        qx=x_fp4.view(torch.uint8),
+        global_amax=global_max,
+        blockwise_scales=S_dec_b,
+        global_encode_scale=S_enc,
+        global_decode_scale=S_dec,
+        quantized_decode_scales=S_dec_b_e4m3,
+        dequantized_encode_scales=S_enc_b,
+        scaled_x=scaled_x,
+        clipped_x=clipped_x,
+        blockwise_maxes=block_max,
+    )
+
 
 # https://github.com/pytorch/pytorch/blob/a5436a5e8e4ee42d1debf52c2786c7ae0043a434/test/test_scaled_matmul_cuda.py#L1820
 def torch_native_nvfp4_gemm(
     xq, x_scale_blocked, x_global_scale, wq, w_scale_blocked, w_global_scale, output_dtype
 ):
-
     RECIPE = [ScalingType.BlockWise1x16, ScalingType.TensorWise]
     swizzle = [SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE]
 
