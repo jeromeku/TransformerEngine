@@ -324,10 +324,20 @@ def torch_quantize_to_nvfp4(
     )
 
 
+ADMISSIBLE_DTYPES = [torch.float4_e2m1fn_x2, torch.uint8] 
 # https://github.com/pytorch/pytorch/blob/a5436a5e8e4ee42d1debf52c2786c7ae0043a434/test/test_scaled_matmul_cuda.py#L1820
+# scale_mm_v2 api added at this commit: https://github.com/pytorch/pytorch/commit/6a7f5c0d21a22959d014c8b06f3efe3408336aaf
 def torch_native_nvfp4_gemm(
     xq, x_scale_blocked, x_global_scale, wq, w_scale_blocked, w_global_scale, output_dtype
 ):
+    assert xq.dtype in ADMISSIBLE_DTYPES
+    assert wq.dtype in ADMISSIBLE_DTYPES
+    if xq.dtype == torch.uint8:
+        xq = xq.view(torch.float4_e2m1fn_x2)
+
+    if wq.dtype == torch.uint8:
+        wq = wq.view(torch.float4_e2m1fn_x2)
+
     RECIPE = [ScalingType.BlockWise1x16, ScalingType.TensorWise]
     swizzle = [SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE]
 
