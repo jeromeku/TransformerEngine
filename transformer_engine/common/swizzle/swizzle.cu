@@ -216,9 +216,20 @@ __device__ void swizzle_row_scaling_kernel_impl(const void* input, void* output,
         }
       }
     }
-
-    // shuffle regs
+    // After load, each thread owns up to up to 4 128 x 4 tiles
+    // Loads are contiguous up to int4 (4 tiles, each tile comprised of 4 1-byte scale factors along K)
+    // Each thread loads at TB_DIM = 32 apart, which matches swizzled layout (128 x 4 -> 32 x 16)
+    // The 4 rows that each thread loads must be contiguous in the output
+    // I.e., thread0 loads 4 tiles, it owns 4x4 elements of rows 0, 32, 64, 96
+    // Viewing this as a 4 x 4 matrix of ints, we need to transpose this to get the required output layout
+    // We want 4 byte chunks of each row contiguous per the 32 x 16 output requirement 
+    // shuffle regs 
     regs_shuffle<LType>(regs_vec);
+
+// SF_TILE_SIZE_I32 / 4 = 32 -> This corresponds to the 32 x 16 output layout required 
+// https://docs.nvidia.com/cuda/cublas/#d-block-scaling-factors-layout
+// E.g., thread 0 writes (int4) 16 bytes = 16 SFs for each tile
+// The number of int4 rows in between tiles is 32 where each row corresponds to the 16 SF of 32 x 16 spec 
 
 // store, regs -> shared
 #pragma unroll
@@ -226,7 +237,7 @@ __device__ void swizzle_row_scaling_kernel_impl(const void* input, void* output,
       /* TODO rotate i */
       slm_v4i[(threadIdx.x * N_TILE_PER_TD + i) * SF_TILE_SIZE_I32 / 4 + threadIdx.y] =
           reinterpret_cast<int4*>(regs_vec)[i];
-    }
+    } 
   }
   __syncthreads();
 
@@ -398,11 +409,11 @@ void swizzle_scaling_factors(const Tensor* input, Tensor* output, cudaStream_t s
     int vec_load_size = (num_tiles_k - 1) % 4 + 1;
     /* there is no int3 and misaligned if using int4/int2 */
     if (vec_load_size == 3) vec_load_size = 1;
-    int n_tiles_in_tb = TB_DIM * vec_load_size;
-    dim3 num_blocks(DIVUP(num_tiles_k, n_tiles_in_tb), num_tiles_m);
+    int n_tiles_in_tb = TB_DIM * vec_load_size; // num_tiles_k = 512 // 16 // 4 = 8; vec_load_size = 4, n_tiles_in_tb = 32 * 4 = 128
+    dim3 num_blocks(DIVUP(num_tiles_k, n_tiles_in_tb), num_tiles_m); // num_blocks(1, 2); num_tiles_m = 2
     int slm_size = n_tiles_in_tb * SF_TILE_DIM_M * SF_TILE_DIM_K * sizeof(int8_t);
 
-    int original_M, original_K;
+    int original_M, original_K; // 256, 32 where 32 = (512 // 16)
     void *input_scale_inv_ptr, *output_scale_inv_ptr;
 
     if (!nvfp4 || input->has_data()) {
