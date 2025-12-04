@@ -235,6 +235,8 @@ __device__ void swizzle_row_scaling_kernel_impl(const void* input, void* output,
 #pragma unroll
     for (int i = 0; i < N_TILE_PER_TD; i++) {
       /* TODO rotate i */
+      // Bank conflicts?  Each iteration each thread is writing int4, so 8 threads will write a cache line
+      // So up to 4 way bank conflict per iteration
       slm_v4i[(threadIdx.x * N_TILE_PER_TD + i) * SF_TILE_SIZE_I32 / 4 + threadIdx.y] =
           reinterpret_cast<int4*>(regs_vec)[i];
     } 
