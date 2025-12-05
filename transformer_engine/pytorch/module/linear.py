@@ -267,6 +267,8 @@ class _Linear(torch.autograd.Function):
                 weight_quantizer = weight._quantizer
             # Get quantized weight
             update_workspace = is_first_microbatch is None or is_first_microbatch
+            # Quantization happens in get_weight_workspace
+            breakpoint()
             weightmat = module.get_weight_workspace(
                 tensor=weight,
                 quantizer=weight_quantizer,
@@ -276,7 +278,6 @@ class _Linear(torch.autograd.Function):
                 fsdp_group=fsdp_group,
                 workspace_dtype=activation_dtype,
             )
-            breakpoint()
             weightmat.update_usage(rowwise_usage=True)
 
         else:

@@ -9,12 +9,13 @@ torch.manual_seed(12345)
 fp8_recipe = NVFP4BlockScaling()
 # NOTE: default recipe applies RHT to input / output fwd gemm which requires weights / activations in bfloat16 (see test_nvfp4_module_exact test)
 high_precision_dtype = torch.bfloat16
-my_linear = te.Linear(768, 768, params_dtype=high_precision_dtype, bias=False)
+my_linear = te.Linear(768, 2048, params_dtype=high_precision_dtype, bias=False)
 
 inp = torch.rand((1024, 768), dtype=high_precision_dtype, requires_grad=True).cuda()
 with te.autocast(enabled=True, recipe=fp8_recipe):
     out_fp8 = my_linear(inp)
 loss = out_fp8.mean()
+breakpoint()
 loss.backward()
 
 """    
