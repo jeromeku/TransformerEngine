@@ -221,8 +221,7 @@ def test_quantization_block_tiling_versus_reference(
     M: int,
     N: int,
 ) -> None:
-    if x_dtype == torch.float32 and use_RHT:
-        pytest.skip("RHT is only supported with bfloat16")
+    assert not (x_dtype == torch.float32 and use_RHT), "RHT only supported for bf16"
     check_quantization_nvfp4_versus_reference(
         x_dtype=x_dtype,
         use_2D=use_2D,
@@ -241,6 +240,8 @@ if __name__ == "__main__":
     dtype = torch.bfloat16
     use_rht = False
     use_2D = False
+    M, N = SHAPES[0]
+
     test_quantization_block_tiling_versus_reference(
-        x_dtype=dtype, use_2D=use_2D, use_RHT=use_rht, *SHAPES[0]
+        x_dtype=dtype, use_2D=use_2D, use_RHT=use_rht, M=M, N=N
     )

@@ -224,6 +224,7 @@ class _Linear(torch.autograd.Function):
                 )
 
         else:  # Do not all-gather input tensor
+            breakpoint()
             if fp8 or debug:
                 if isinstance(inputmat, QuantizedTensorStorage):
                     inputmat.update_usage(rowwise_usage=True)
@@ -275,6 +276,7 @@ class _Linear(torch.autograd.Function):
                 fsdp_group=fsdp_group,
                 workspace_dtype=activation_dtype,
             )
+            breakpoint()
             weightmat.update_usage(rowwise_usage=True)
 
         else:
@@ -316,6 +318,7 @@ class _Linear(torch.autograd.Function):
             out_shape[-1] = out_features
             reduce_scatter_out = torch.empty(out_shape, dtype=activation_dtype, device=inp.device)
 
+        breakpoint()
         # ------------------------------------------------------
         # Forward GEMM
         # Note: y = x * w^T
@@ -381,7 +384,7 @@ class _Linear(torch.autograd.Function):
             ctx.backward_input_needs_gather = (
                 weight.requires_grad and parallel_mode == "column" and sequence_parallel
             )
-
+            breakpoint()
             # Discard unneeded data in input tensor
             if (
                 backward_needs_input
@@ -430,6 +433,7 @@ class _Linear(torch.autograd.Function):
 
             mark_not_offload(weight, weightmat, bias)
             # TODO(ksivamani): Check memory usage
+            breakpoint()
             tensors_to_save, tensor_objects = prepare_for_saving(
                 saved_inputmat,
                 weightmat,
@@ -595,7 +599,7 @@ class _Linear(torch.autograd.Function):
                 and ctx.grad_output_quantizer is not None
             ):
                 ctx.grad_output_quantizer.set_usage(columnwise=False)
-
+            breakpoint()
             # Prepare grad output tensor
             nvtx_range_push(f"{nvtx_label}.grad_output_preprocess")
             (
@@ -684,6 +688,7 @@ class _Linear(torch.autograd.Function):
 
             dgrad = None
             dgrad_work = None
+            breakpoint()
             if ctx.requires_dgrad:
 
                 # Make sure required data is available
@@ -717,7 +722,7 @@ class _Linear(torch.autograd.Function):
 
                 # dgrad GEMM
                 # Note: dx = dy * w
-
+                breakpoint()
                 nvtx_range_push(f"{nvtx_label}.dgrad_gemm")
                 gemm_out, *_, reduce_scatter_out = general_gemm(
                     weight_fp8,
@@ -763,7 +768,7 @@ class _Linear(torch.autograd.Function):
             # --------------------------------------------------
             # Compute grad weight
             # --------------------------------------------------
-
+            breakpoint()
             wgrad = None
             if ctx.requires_wgrad:
 
@@ -814,7 +819,7 @@ class _Linear(torch.autograd.Function):
                     tex.bulk_overlap_ag_with_external_gemm(
                         ub_obj_overlap_wgrad, dgrad_send_stream, dgrad_recv_stream
                     )
-
+                breakpoint()
                 if ctx.fp8 or ctx.debug:
                     if isinstance(grad_output, QuantizedTensorStorage):
                         grad_output.update_usage(columnwise_usage=True)
