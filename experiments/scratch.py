@@ -1,11 +1,11 @@
 import torch
-from typing import List
+from typing import List, TypeAlias, Tuple, Literal
 
-    
+
 def cast_to_fp4x2(x: torch.Tensor):
     """Quantize to E2M1 and pack into a byte tensor
-    Performs round-to-nearest-even binning.
-    
+
+    NOTE: Ties are rounded to the nearest even.
     """
 
     result = torch.zeros_like(x, dtype=torch.uint8)
@@ -28,30 +28,41 @@ def cast_to_fp4x2(x: torch.Tensor):
     result[x < -5.0] = 15
 
     return result[:, ::2] + result[:, 1::2] * 16
+
+
 FLOAT4_E2M1_MAX = 6.0
 FLOAT8_E4M3_MAX = 448.0
 
-def blockwise_quantize_nvfp4(x: torch.Tensor, tile_shape: List[int] = [16, 1]):
+
+NVFP4_BLOCKSIZE = 16
+
+NVFP4_1D_TILE = [NVFP4_BLOCKSIZE, 1]  # blockwise shape along reduction dim
+NVFP4_2D_TILE = [
+    NVFP4_BLOCKSIZE,
+    NVFP4_BLOCKSIZE,
+]  # symmetric quant for weight tensors and chain-rule consistency
+NVFP4_TILESHAPE = NVFP4_1D_TILE | NVFP4_2D_TILE
+
+def blockwise_quantize_nvfp4(x: torch.Tensor, tile_shape: "NVFP4_TILESHAPE"):
     M, N = x.shape
+    assert tile_shape in [NVFP4_1D_TILE, NVFP4_2D_TILE]
     tile_len_x, tile_len_y = tile_shape
-    using_2d_quantization = tile_len_x == 16 and tile_len_y == 16
+
+    using_2d_quantization = tile_shape == NVFP4_2D_TILE
 
     global_amax = torch.amax(torch.abs(x))
 
     if using_2d_quantization:
         x_blocks = (
-            x.unfold(0, tile_len_y, tile_len_y)
-            .unfold(1, tile_len_x, tile_len_x)
-            .to(torch.float32)
+            x.unfold(0, tile_len_y, tile_len_y).unfold(1, tile_len_x, tile_len_x).to(torch.float32)
         )
-        block_amax = torch.amax(torch.abs(x_blocks), dim=(-1, -2))  
-        vec_max = block_amax.repeat_interleave(tile_len_y, dim=0).unsqueeze(-1) 
+        block_amax = torch.amax(torch.abs(x_blocks), dim=(-1, -2))
+        vec_max = block_amax.repeat_interleave(tile_len_y, dim=0).unsqueeze(-1)
     else:
-        
-        x_reshaped = x.view(M, N // tile_len_x, tile_len_x)  
+        x_reshaped = x.view(M, N // tile_len_x, tile_len_x)
         vec_max = torch.amax(torch.abs(x_reshaped), dim=-1, keepdim=True).to(
             torch.float32
-        )  # (128, 8, 1)
+        )
 
     x = x.view(M, N // tile_len_x, tile_len_x)
     decode_scale = torch.div(vec_max, FLOAT4_E2M1_MAX)
