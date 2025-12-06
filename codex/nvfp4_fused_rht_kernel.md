@@ -325,6 +325,34 @@ Key points:
 - All heavy lifting is done inside `rht_gemm_ntt_w_sfc`, which constructs the TMA pipeline,
   shared‑memory layouts, and launches `rht_gemm_device`.
 
+For completeness, the device kernel receiving these shapes and pointers is:
+
+```cpp
+template <class MShape, class NShape, class KShape, class ClusterTileShape,
+          class TA, class AStride, class ASmemLayout, class TmaLoadA,
+          class TB, class BStride, class BSmemLayout, class TmaLoadB,
+          class TC, class CStride, class CSmemLayout,
+          class TSFC,
+          class TiledMMA,
+          bool kEnableStochasticRounding>
+__global__ static
+void
+rht_gemm_device(MShape M, NShape N, KShape K, ClusterTileShape cluster_tile,
+            TA const* A, AStride dA, ASmemLayout sAlayout, CUTE_GRID_CONSTANT TmaLoadA const tma_load_a,
+            TB const* B, BStride dB, BSmemLayout sBlayout, CUTE_GRID_CONSTANT TmaLoadB const tma_load_b,
+            TC      * C, CStride dC, CSmemLayout         ,
+            TSFC    * SFC,
+            TiledMMA mma,
+            float const* global_amax,
+            const size_t* rng_state);
+```
+
+Interpreting the original `[m, n]` row‑major BF16 input as an `n×m` **column‑major** matrix
+is mathematically equivalent to using `inputᵀ`. Writing `C` as `n×m` row‑major then
+represents `RHT(xᵀ)` in the layout expected for NVFP4 columnwise GEMMs. No explicit
+element‑wise transpose kernel is needed; the transpose is encoded in the `(m, n)` swap and
+the column‑major vs row‑major interpretations used by `rht_gemm_device`.
+
 ---
 
 ## 4. Device Kernel Setup: `rht_gemm_ntt_w_sfc` → `rht_gemm_device`
