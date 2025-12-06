@@ -1602,3 +1602,159 @@ uint4 random_uint4 = rng.generate4();
     - Rowwise FP4 tensor (1024×768) with rowwise scales (1024×48).
     - Transposed FP4 tensor (768×1024) with columnwise scales (768×64).
   - In 2D mode the scale tensors reflect 16×16 2D blocks; in 1D mode they reflect separate 16‑element stripes along rows/cols.
+
+---
+
+## 13. Addendum: Where RHT Is Applied in the Fused Rowwise+Columnwise Path
+
+This document has focused on the **pure NVFP4 quantize+transpose kernels** in  
+[`quantize_transpose_nvfp4.cuh`](../transformer_engine/common/cast/nvfp4/quantize_transpose_nvfp4.cuh).  
+Those kernels **do not apply the Random Hadamard Transform (RHT)** themselves; they only
+see BF16 inputs (possibly already RHT‑transformed) and produce NVFP4 rowwise/columnwise
+outputs with scales.
+
+When both **rowwise and columnwise usages are requested** for an NVFP4 tensor (e.g.,
+forward activations with `columnwise_usage=True` so WGrad can reuse a quantized
+transpose), the C++ NVFP4 quantizer decides how to produce the columnwise view:
+
+- **File**: `transformer_engine/pytorch/csrc/quantizer.cpp`  
+  - `NVFP4Quantizer::quantize_impl`  
+    [`quantizer.cpp:1350–1705`](../transformer_engine/pytorch/csrc/quantizer.cpp#L1350-L1705)
+
+### 13.1 High‑Level Split: Rowwise vs Columnwise
+
+Inside `NVFP4Quantizer::quantize_impl`, once input/output wrappers are built and
+`rowwise_usage` / `columnwise_usage` are known, the implementation splits into:
+
+- Rowwise path:
+
+  ```cpp
+  if (rowwise_usage) {
+    TensorWrapper out_identity(out.scaling_mode());
+    ...
+    out_identity.set_rowwise_data(...);
+    out_identity.set_rowwise_scale_inv(...);
+    out_identity.set_amax(...);
+
+    NVTE_SCOPED_GIL_RELEASE(
+        { nvte_quantize_v2(input.data(), out_identity.data(), quant_config, stream); });
+  }
+  ```
+
+  Here `nvte_quantize_v2` ultimately invokes the 1D/2D kernels documented above.
+
+- Columnwise path (only if `columnwise_usage == true`):
+
+  ```cpp
+  if (columnwise_usage) {
+    auto out_columnwise_data      = out.get_columnwise_data();
+    auto out_columnwise_scale_inv = out.get_columnwise_scale_inv();
+    auto out_columnwise_amax      = out.get_columnwise_amax();
+
+    TensorWrapper out_transpose(out.scaling_mode());
+    ...
+    out_transpose.set_rowwise_data(out_columnwise_data.data_ptr, ...);
+    out_transpose.set_rowwise_scale_inv(out_columnwise_scale_inv.data_ptr, ...);
+    out_transpose.set_amax(out_columnwise_amax.data_ptr, ...);
+
+    if (!eligible_for_rht_cast_fusion) {
+      // Fallback RHT + quant
+      ...
+    } else {
+      // Fused RHT + quant
+      ...
+    }
+  }
+  ```
+
+The key trick is that `out_transpose` is a **rowwise wrapper** pointing at the
+underlying columnwise FP4 buffers; this lets the standard NVFP4 quantization kernels
+write columnwise data by treating an already‑transposed BF16 tensor as rowwise.
+
+### 13.2 Fallback Path: RHT Then Quantize+Transpose
+
+When `eligible_for_rht_cast_fusion == false`, the quantizer uses two separate kernels:
+
+```cpp
+at::Tensor rht_output_t;
+TensorWrapper rht_output_t_cpp;
+rht_output_t =
+    allocateTorchTensor(static_cast<int>(cols), static_cast<int>(rows), input.dtype());
+rht_output_t_cpp.set_rowwise_data(rht_output_t.data_ptr(), input.dtype(),
+                                  std::vector<size_t>{cols, rows});
+
+NVTE_SCOPED_GIL_RELEASE({
+  // 1. Apply RHT to input.t  →  RHT(xᵀ) (BF16, columnwise layout)
+  nvte_hadamard_transform(input.data(), rht_output_t_cpp.data(), 0,
+                          this->rht_matrix_random_sign_mask_t, stream);
+});
+
+// 2. Quantize RHT(xᵀ) using standard NVFP4 kernels
+NVTE_SCOPED_GIL_RELEASE({
+  nvte_quantize_v2(rht_output_t_cpp.data(), out_transpose.data(), quant_config, stream);
+});
+```
+
+- **RHT is applied here** by `nvte_hadamard_transform`, which reads `input` in BF16,
+  logically transposes it, and multiplies by the Hadamard matrix (plus random sign mask).
+- The output `rht_output_t_cpp` is a BF16 tensor in the **transposed layout**.
+- `nvte_quantize_v2` then calls into `quantize_transpose_nvfp4_kernel` / `quantize_transpose_nvfp4_2D_kernel`,
+  treating `rht_output_t_cpp` as rowwise input and `out_transpose` as rowwise output, so the
+  standard quantize+transpose machinery produces the columnwise FP4 data and scales.
+
+In this fallback path the quantize+transpose kernels remain unchanged; they never “see”
+the RHT directly—they just consume the already‑transformed BF16 tensor.
+
+### 13.3 Fused Path: `hadamard_transform_cast_fusion_columnwise`
+
+When `eligible_for_rht_cast_fusion == true`, the quantizer uses a **single fused kernel**
+that performs RHT and NVFP4 quantization in one go:
+
+```cpp
+NVTE_CHECK(this->rht_matrix.defined() && this->rht_matrix.numel() > 0,
+           "RHT matrix is not set");
+auto rht_matrix_nvte = makeTransformerEngineTensor(this->rht_matrix);
+NVTE_SCOPED_GIL_RELEASE({
+  nvte_hadamard_transform_cast_fusion_columnwise(
+      input.data(), out_transpose.data(), rht_matrix_nvte.data(), quant_config, stream);
+});
+```
+
+- **File**: `transformer_engine/common/hadamard_transform/hadamard_transform_cast_fusion.cu`  
+  - Host entry:  
+    [`hadamard_transform_cast_fusion_columnwise`](../transformer_engine/common/hadamard_transform/hadamard_transform_cast_fusion.cu#L707-L776)
+  - Device implementation: calls `detail::rht_gemm_ttt_wrapper` with:
+    - BF16 input tiles (TMA).
+    - BF16 Hadamard matrix tiles.
+    - FP4 output tiles (`TC = float_e2m1_t`) directly in **columnwise** layout.
+    - Per‑block scales (`TSFC = float_ue4m3_t`) and optional stochastic rounding.
+
+In this fused path:
+
+- RHT is applied **inside** the fused kernel by multiplying each BF16 tile of `input`
+  by the BF16 Hadamard matrix (with per‑tile random sign masks).
+- The same kernel:
+  - Computes per‑block amax for the RHT result.
+  - Computes NVFP4 decode scales and encodes FP4 values.
+  - Writes both FP4 data and scales directly into the columnwise buffers that
+    `out_transpose` points to.
+
+Again, the standalone NVFP4 quantize+transpose kernels are unchanged; when the fused
+path is used they are simply **bypassed** for the columnwise view (rowwise still uses
+`nvte_quantize_v2`).
+
+### 13.4 Summary: RHT Location Relative to `quantize_transpose_nvfp4_kernel`
+
+- `quantize_transpose_nvfp4_kernel` (and its 2D variant) **never** implement the RHT
+  themselves; they assume BF16 inputs already contain whatever transform is desired.
+- For fused rowwise+columnwise NVFP4 with RHT enabled:
+  - **Fallback**: `nvte_hadamard_transform(input)` produces `RHT(xᵀ)` in BF16, then
+    `nvte_quantize_v2` + `quantize_transpose_nvfp4*` quantize+transpose it.
+  - **Fused**: `nvte_hadamard_transform_cast_fusion_columnwise` performs:
+    - RHT + per‑block amax + NVFP4 scaling + FP4 encoding
+    - Directly into the columnwise FP4 storage; the quantize+transpose kernels
+      are only used for the rowwise view.
+
+This separation of concerns keeps the NVFP4 kernels focused on **tiling, scaling, and
+FP4 packing**, while all RHT‑specific logic (Hadamard matrices, random sign masks,
+RHT amax semantics) lives in the Hadamard transform modules.

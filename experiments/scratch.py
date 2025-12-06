@@ -136,8 +136,6 @@ def qgemm(
     sw: torch.Tensor,
     global_amax_x: torch.Tensor,
     global_amax_w: torch.Tensor,
-    out: torch.Tensor | None = None,
-    accumulate: bool = False,
 ) -> torch.Tensor:
     """Python implementation of microblock FP4 GEMM."""
 
