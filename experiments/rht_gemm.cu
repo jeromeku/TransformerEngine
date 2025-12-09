@@ -28,13 +28,13 @@ using namespace cute;
 // TODO: check where the RHT is constructed
 
 template <typename T>
-__host__ __device__ void print_cute(const char *msg, T obj) {
+__host__ __device__ void print_cute(const char* msg, T obj) {
     printf("%s\n", msg);
     cute::print(obj);
     printf("\n");
 }
 template <typename T, class Fn>
-void print_swizzle(int cols, int rows, Fn &&fn) {
+void print_swizzle(int cols, int rows, Fn&& fn) {
     auto bytes = sizeof(T);
     const int effective_cols = bytes * cols;
     for (int i = 0; i < rows; i++) {
@@ -47,169 +47,190 @@ void print_swizzle(int cols, int rows, Fn &&fn) {
         printf("\n");
     }
 }
-template <class ElementA,
-          class ElementB,
-          class ASmemLayout,
-          class BSmemLayout>
+template <class ElementA, class ElementB, class ASmemLayout, class BSmemLayout>
 struct SharedStorage {
-  static constexpr int AccumulatorPipelineStageCount = 16;
-  using AtomThrShapeMNK = cute::Shape<_1, _1, _1>;
+    static constexpr int AccumulatorPipelineStageCount = 16;
+    using AtomThrShapeMNK = cute::Shape<_1, _1, _1>;
 
-  using AccumulatorPipeline = cutlass::PipelineUmmaAsync<AccumulatorPipelineStageCount / 4, AtomThrShapeMNK>;
-  using AccumulatorPipelineStorage = typename AccumulatorPipeline::SharedStorage;
+    using AccumulatorPipeline =
+        cutlass::PipelineUmmaAsync<AccumulatorPipelineStageCount / 4,
+                                   AtomThrShapeMNK>;
+    using AccumulatorPipelineStorage =
+        typename AccumulatorPipeline::SharedStorage;
 
-  static constexpr int MainloopPipelineStageCount = size<3>(ASmemLayout{});
-  using MainloopPipeline = cutlass::PipelineTmaUmmaAsync<
-                             MainloopPipelineStageCount,
-                             Shape<_1,_1,_1>,
-                             AtomThrShapeMNK>;
-  using MainloopPipelineStorage = typename MainloopPipeline::SharedStorage;
+    static constexpr int MainloopPipelineStageCount = size<3>(ASmemLayout{});
+    using MainloopPipeline =
+        cutlass::PipelineTmaUmmaAsync<MainloopPipelineStageCount,
+                                      Shape<_1, _1, _1>, AtomThrShapeMNK>;
+    using MainloopPipelineStorage = typename MainloopPipeline::SharedStorage;
 
-  alignas(16) AccumulatorPipelineStorage accumulator;
-  alignas(16) MainloopPipelineStorage mainloop;
-  alignas(16) cute::uint64_t tma_barrier[1];
-  uint32_t tmem_base_ptr;
+    alignas(16) AccumulatorPipelineStorage accumulator;
+    alignas(16) MainloopPipelineStorage mainloop;
+    alignas(16) cute::uint64_t tma_barrier[1];
+    uint32_t tmem_base_ptr;
 
-  struct TensorStorage : cute::aligned_struct<128, _1> {
-    // cute::array_aligned<ElementA, cute::cosize_v<ASmemLayout>> smem_A;
-    cute::array_aligned<ElementA, cute::cosize_v<ASmemLayout>> smem_A;
-    cute::array_aligned<ElementB, cute::cosize_v<BSmemLayout>> smem_B;
-  } tensors;
-
+    struct TensorStorage : cute::aligned_struct<128, _1> {
+        // cute::array_aligned<ElementA, cute::cosize_v<ASmemLayout>> smem_A;
+        cute::array_aligned<ElementA, cute::cosize_v<ASmemLayout>> smem_A;
+        cute::array_aligned<ElementB, cute::cosize_v<BSmemLayout>> smem_B;
+    } tensors;
 };
+#define PRINT_DELIMITER                                                     \
+    printf(                                                                 \
+        "\n ------------------------------------------------------------- " \
+        "\n");
 
 template <class MShape, class NShape, class KShape, class ClusterTileShape,
-          class TA, class AStride, class ASmemLayout, class TmaLoadA,
-          class TB, class BStride, class BSmemLayout, class TmaLoadB,
-          class TC_, class CStride, class CSmemLayout,
-          class TSFC_,
-          class TiledMMA,
+          class TA, class AStride, class ASmemLayout, class TmaLoadA, class TB,
+          class BStride, class BSmemLayout, class TmaLoadB, class TC_,
+          class CStride, class CSmemLayout, class TSFC_, class TiledMMA,
           bool kEnableStochasticRounding = false>
-__global__ static
-void
-rht_gemm_device(MShape M, NShape N, KShape K, ClusterTileShape cluster_tile,
-            TA const* A, AStride dA, ASmemLayout sAlayout, CUTE_GRID_CONSTANT TmaLoadA const tma_load_a,
-            TB const* B, BStride dB, BSmemLayout sBlayout, CUTE_GRID_CONSTANT TmaLoadB const tma_load_b,
-            TC_      * C, CStride dC, CSmemLayout         ,
-            TSFC_    * SFC,
-            TiledMMA mma)
-            // float const* global_amax,
-            // const size_t* rng_state)
+__global__ static void rht_gemm_device(
+    MShape M, NShape N, KShape K, ClusterTileShape cluster_tile, TA const* A,
+    AStride dA, ASmemLayout sAlayout,
+    CUTE_GRID_CONSTANT TmaLoadA const tma_load_a, TB const* B, BStride dB,
+    BSmemLayout sBlayout, CUTE_GRID_CONSTANT TmaLoadB const tma_load_b, TC_* C,
+    CStride dC, CSmemLayout, TSFC_* SFC, TiledMMA mma)
+// float const* global_amax,
+// const size_t* rng_state)
 {
-  using X = Underscore;
-  using TC = cute::float_e2m1_t;
-  using TSFC = cute::float_e4m3_t;
+    using X = Underscore;
+    using TC = cute::float_e2m1_t;
+    using TSFC = cute::float_e4m3_t;
 
-  // static constexpr bool kApplyStochasticRounding = true;
-  using ElementAccumulator = float;
-  static constexpr int K_PIPE_MAX = size<3>(ASmemLayout{});
-  using AtomThrShapeMNK = Shape<decltype(shape<0>(typename TiledMMA::ThrLayoutVMNK{})), _1, _1>;
-  static constexpr uint32_t kTmaTransactionBytes =
-    cutlass::bits_to_bytes(size(AtomThrShapeMNK{}) * cosize(take<0,3>(ASmemLayout{})) * cute::sizeof_bits_v<TA>);
+    // static constexpr bool kApplyStochasticRounding = true;
+    using ElementAccumulator = float;
+    static constexpr int K_PIPE_MAX = size<3>(ASmemLayout{});
+    using AtomThrShapeMNK =
+        Shape<decltype(shape<0>(typename TiledMMA::ThrLayoutVMNK{})), _1, _1>;
+    static constexpr uint32_t kTmaTransactionBytes = cutlass::bits_to_bytes(
+        size(AtomThrShapeMNK{}) * cosize(take<0, 3>(ASmemLayout{})) *
+        cute::sizeof_bits_v<TA>);
 
-  static constexpr int kTmaRhtTensorTransactionBytes =
-    cutlass::bits_to_bytes(16 * 16 * cute::sizeof_bits_v<TB>);
-  static constexpr int AccumulatorPipelineStageCount = 16;
+    static constexpr int kTmaRhtTensorTransactionBytes =
+        cutlass::bits_to_bytes(16 * 16 * cute::sizeof_bits_v<TB>);
+    static constexpr int AccumulatorPipelineStageCount = 16;
 
-  static constexpr int MainloopPipelineStageCount = size<3>(ASmemLayout{});
-  using MainloopPipeline = cutlass::PipelineTmaUmmaAsync<
-                             MainloopPipelineStageCount,
-                             Shape<_1,_1,_1>,
-                             AtomThrShapeMNK>;
-  using MainloopPipelineState = typename MainloopPipeline::PipelineState;
+    static constexpr int MainloopPipelineStageCount = size<3>(ASmemLayout{});
+    using MainloopPipeline =
+        cutlass::PipelineTmaUmmaAsync<MainloopPipelineStageCount,
+                                      Shape<_1, _1, _1>, AtomThrShapeMNK>;
+    using MainloopPipelineState = typename MainloopPipeline::PipelineState;
 
-  using TmemAllocator = cute::TMEM::Allocator1Sm;
-  static constexpr int VectorSize = 16;
-//   const size_t rng_seed = rng_state != nullptr ? rng_state[0] : 0;
-//   const size_t rng_offset = rng_state != nullptr ? rng_state[1] : 0;
-  // Preconditions
-//   CUTE_STATIC_ASSERT(is_static<ASmemLayout>::value);
-//   CUTE_STATIC_ASSERT(is_static<BSmemLayout>::value);
-//   CUTE_STATIC_ASSERT(is_static<CSmemLayout>::value);
+    using TmemAllocator = cute::TMEM::Allocator1Sm;
+    static constexpr int VectorSize = 16;
+    //   const size_t rng_seed = rng_state != nullptr ? rng_state[0] : 0;
+    //   const size_t rng_offset = rng_state != nullptr ? rng_state[1] : 0;
+    // Preconditions
+    //   CUTE_STATIC_ASSERT(is_static<ASmemLayout>::value);
+    //   CUTE_STATIC_ASSERT(is_static<BSmemLayout>::value);
+    //   CUTE_STATIC_ASSERT(is_static<CSmemLayout>::value);
 
-  // Represent the full tensors
-  Tensor mA = tma_load_a.get_tma_tensor(make_shape(M,N));
-  Tensor mB = tma_load_b.get_tma_tensor(make_shape(16,16));
-  Tensor mC = make_tensor(cute::subbyte_iterator<TC>(C), make_shape(M,N), dC);      // (M,N)
+    // Represent the full tensors
+    Tensor mA = tma_load_a.get_tma_tensor(make_shape(M, N));
+    Tensor mB = tma_load_b.get_tma_tensor(make_shape(16, 16));
+    Tensor mC = make_tensor(cute::subbyte_iterator<TC>(C), make_shape(M, N),
+                            dC);  // (M,N)
 
-  auto sfc_shape  = make_shape(
-    M,
-    make_shape( make_shape(Int<16>{}, _4{}), N / 64 )
-  );
+    auto sfc_shape =
+        make_shape(M, make_shape(make_shape(Int<16>{}, _4{}), N / 64));
 
-  auto sfc_stride = make_stride(
-    N / 16,
-    make_stride( make_stride(_0{}, _1{}), _4{} )
-  );
-  auto sfc_layout = make_layout(sfc_shape, sfc_stride);
-  if(thread0()){
-    print_cute("mA", mA);
-    print_cute("mB", mB);
-    print_cute("mC", mC);
-    print_cute("sfc_layout", sfc_layout);
-  }
+    auto sfc_stride =
+        make_stride(N / 16, make_stride(make_stride(_0{}, _1{}), _4{}));
+    auto sfc_layout = make_layout(sfc_shape, sfc_stride);
 
-  Tensor mSFC = make_tensor(make_gmem_ptr(SFC), sfc_layout);
+    if (thread0()) {
+        PRINT_DELIMITER
+        print_cute("mA", mA);
+        print_cute("mB", mB);
+        print_cute("mC", mC);
+        print_cute("sfc_layout", sfc_layout);
+    }
 
-  auto cluster_shape = Shape<  _1,  _1, _1>{};
+    Tensor mSFC = make_tensor(make_gmem_ptr(SFC), sfc_layout);
 
-  // Get the appropriate blocks for this Cluster
-  dim3 cluster_coord_in_grid = cluster_id_in_grid();
+    auto cluster_shape = Shape<_1, _1, _1>{};
 
-  // Total number of k-tiles
-  const int K_TILE_MAX  = min(N, K) / 64;
-  uint32_t tiles_in_m = (M + size<0>(cluster_tile) - 1) / size<0>(cluster_tile);
-  uint32_t tiles_in_n = (N + 64 - 1) / 64;
-  uint32_t linear_tile_idx = blockIdx.x;
-  uint32_t tile_idx_m = linear_tile_idx % tiles_in_m;
-  uint32_t tile_idx_n = (linear_tile_idx / tiles_in_m) * K_TILE_MAX;
+    // Get the appropriate blocks for this Cluster
+    dim3 cluster_coord_in_grid = cluster_id_in_grid();
 
+    // Total number of k-tiles
+    const int K_TILE_MAX = min(N, K) / 64;
+    uint32_t tiles_in_m =
+        (M + size<0>(cluster_tile) - 1) / size<0>(cluster_tile);
+    uint32_t tiles_in_n = (N + 64 - 1) / 64;
+    uint32_t linear_tile_idx = blockIdx.x;
+    uint32_t tile_idx_m = linear_tile_idx % tiles_in_m;
+    uint32_t tile_idx_n = (linear_tile_idx / tiles_in_m) * K_TILE_MAX;
 
-  auto mainloop_tiler = Shape<_128,_16,_64>{};
-  auto epilogue_tiler = Shape<_128,_64,_64>{};
-  Tensor gA_mk = local_tile(mA, mainloop_tiler, make_coord(_,_, _), Step<_1, X,_1>{});
-  Tensor gB_nk = local_tile(mB, cluster_tile, make_coord(_,_, _), Step< X,_1,_1>{});  // (BLK_N,BLK_K,k)
-  Tensor gC_mn = local_tile(mC, epilogue_tiler, make_coord(_,_, _), Step<_1,_1, X>{});  // (BLK_M,BLK_N)
+    auto mainloop_tiler = Shape<_128, _16, _64>{};
+    auto epilogue_tiler = Shape<_128, _64, _64>{};
+    Tensor gA_mk =
+        local_tile(mA, mainloop_tiler, make_coord(_, _, _), Step<_1, X, _1>{});
+    Tensor gB_nk = local_tile(mB, cluster_tile, make_coord(_, _, _),
+                              Step<X, _1, _1>{});  // (BLK_N,BLK_K,k)
+    Tensor gC_mn = local_tile(mC, epilogue_tiler, make_coord(_, _, _),
+                              Step<_1, _1, X>{});  // (BLK_M,BLK_N)
 
-  Tensor gSFC_mn = local_tile(mSFC, epilogue_tiler, make_coord(_,_, _), Step<_1,_1, X>{});  // (BLK_M,BLK_N)
-  // Allocate SMEM
-  extern __shared__ char shared_memory[];
-  using SharedStorage = SharedStorage<TA, TB, ASmemLayout, BSmemLayout>;
-  SharedStorage& shared_storage = *reinterpret_cast<SharedStorage*>(shared_memory);
-  Tensor tCsA = make_tensor(make_smem_ptr(shared_storage.tensors.smem_A.data()), sAlayout);  // (MMA,MMA_M,MMA_N,PIPE)
-  Tensor tCsB = make_tensor(make_smem_ptr(shared_storage.tensors.smem_B.data()), sBlayout);  // (MMA,MMA_N,MMA_K,PIPE)
+    Tensor gSFC_mn = local_tile(mSFC, epilogue_tiler, make_coord(_, _, _),
+                                Step<_1, _1, X>{});  // (BLK_M,BLK_N)
 
+    // Allocate SMEM
+    extern __shared__ char shared_memory[];
+    using SharedStorage = SharedStorage<TA, TB, ASmemLayout, BSmemLayout>;
+    SharedStorage& shared_storage =
+        *reinterpret_cast<SharedStorage*>(shared_memory);
+    Tensor tCsA =
+        make_tensor(make_smem_ptr(shared_storage.tensors.smem_A.data()),
+                    sAlayout);  // (MMA,MMA_M,MMA_N,PIPE)
+    Tensor tCsB =
+        make_tensor(make_smem_ptr(shared_storage.tensors.smem_B.data()),
+                    sBlayout);  // (MMA,MMA_N,MMA_K,PIPE)
+    if (thread0()) {
+        PRINT_DELIMITER
+        print_cute("K_TILE_MAX", K_TILE_MAX);
+        print_cute("K_PIPE_MAX", K_PIPE_MAX);
+        print_cute("tiles_in_m", tiles_in_m);
+        print_cute("tiles_in_n", tiles_in_n);
+        print_cute("gA_mk", gA_mk);
+        print_cute("gB_nk", gB_nk);
+        print_cute("gC_mn", gC_mn);
+        print_cute("gSFC_mn", gSFC_mn);
+        print_cute("tCsA", tCsA);
+        print_cute("tCsB", tCsB);
 
-  //
-  // MMA: Define C accumulators and A/B partitioning
-  //
+    }
 
-  int block_rank_in_cluster = cute::block_rank_in_cluster();
-  ThrMMA thr_mma = mma.get_slice(block_rank_in_cluster);               // blk idx
-  Tensor tCgB = thr_mma.partition_B(gB_nk);                               // (MMA,MMA_N,MMA_K,k)
+    //
+    // MMA: Define C accumulators and A/B partitioning
+    //
 
-  auto mma_epilogue = make_tiled_mma(SM100_MMA_F16BF16_SS<TA, TB, ElementAccumulator,
-                                               128, 64,
-                                               UMMA::Major::MN, UMMA::Major::MN>{},
-                            Layout<Shape<_1,_1>>{});
-  ThrMMA thr_mma_epilogue = mma_epilogue.get_slice(block_rank_in_cluster);
+    int block_rank_in_cluster = cute::block_rank_in_cluster();
+    ThrMMA thr_mma = mma.get_slice(block_rank_in_cluster);  // blk idx
+    Tensor tCgB = thr_mma.partition_B(gB_nk);  // (MMA,MMA_N,MMA_K,k)
 
+    auto mma_epilogue =
+        make_tiled_mma(SM100_MMA_F16BF16_SS<TA, TB, ElementAccumulator, 128, 64,
+                                            UMMA::Major::MN, UMMA::Major::MN>{},
+                       Layout<Shape<_1, _1>>{});
+    ThrMMA thr_mma_epilogue = mma_epilogue.get_slice(block_rank_in_cluster);
 
-  using TiledMmaEpilogue = decltype(mma_epilogue);
-  Tensor tCgA = thr_mma.partition_A(gA_mk);
-  // Allocate "fragments" -- these are actually umma smem descriptors
-  Tensor tCrA = thr_mma.make_fragment_A(tCsA);                         // (MMA,MMA_M,MMA_K,PIPE)
-  Tensor tCrB = thr_mma.make_fragment_B(tCsB);                         // (MMA,MMA_M,MMA_K,PIPE)
+    using TiledMmaEpilogue = decltype(mma_epilogue);
+    Tensor tCgA = thr_mma.partition_A(gA_mk);
+    // Allocate "fragments" -- these are actually umma smem descriptors
+    Tensor tCrA = thr_mma.make_fragment_A(tCsA);  // (MMA,MMA_M,MMA_K,PIPE)
+    Tensor tCrB = thr_mma.make_fragment_B(tCsB);  // (MMA,MMA_M,MMA_K,PIPE)
 
-  auto acc_shape_mma = partition_shape_C(TiledMMA{}, take<0,2>(ClusterTileShape{}));
-  auto acc_shape_epilogue = partition_shape_C(TiledMmaEpilogue{}, take<0,2>(epilogue_tiler));
+    auto acc_shape_mma =
+        partition_shape_C(TiledMMA{}, take<0, 2>(ClusterTileShape{}));
+    auto acc_shape_epilogue =
+        partition_shape_C(TiledMmaEpilogue{}, take<0, 2>(epilogue_tiler));
 
-  auto bulk_tmem_mma = TiledMMA::make_fragment_C(append(acc_shape_mma,
-                                                      Int<AccumulatorPipelineStageCount>{}));
+    auto bulk_tmem_mma = TiledMMA::make_fragment_C(
+        append(acc_shape_mma, Int<AccumulatorPipelineStageCount>{}));
 
-  auto bulk_tmem_epilogue = TiledMmaEpilogue::make_fragment_C(append(acc_shape_epilogue,
-                                                      Int<AccumulatorPipelineStageCount / 4>{}));
-
+    auto bulk_tmem_epilogue = TiledMmaEpilogue::make_fragment_C(
+        append(acc_shape_epilogue, Int<AccumulatorPipelineStageCount / 4>{}));
 }
 
 int main() {
@@ -246,7 +267,7 @@ int main() {
                        Layout<Shape<_1, _1>>{});
     using TMma = decltype(mma);
     print_cute("Traits K", Traits::K);
-            
+
     print_cute("mmaK", TMma::AtomShape_MNK{});
 
     // MMA in CGA Layout XXX: Need to generalize synchro? {$nv-release-never}
@@ -357,13 +378,13 @@ int main() {
                sP);  // MMA = ((64, 2), (8, 2)), MMA_M=1, MMA_K=4, SP=(1, 13)
     auto sA = UMMA::tile_to_mma_shape(
         SmemLayoutAtomA{}, append(mma_shape_A, sP));  // (MMA,MMA_M,MMA_K,PIPE)
-    
-    // SmemLayoutAtomB (16, 8):(1, 16) - i.e., col major, 4 cols => 128 Bytes, swizzle every 4 cols
-    // mma_shape_B: ((16, 16), 1, 1)
+
+    // SmemLayoutAtomB (16, 8):(1, 16) - i.e., col major, 4 cols => 128 Bytes,
+    // swizzle every 4 cols mma_shape_B: ((16, 16), 1, 1)
     auto sB = UMMA::tile_to_mma_shape(
         SmemLayoutAtomB{}, append(mma_shape_B, sP));  // (MMA,MMA_N,MMA_K,PIPE)
-    
-    auto sC = Layout<_1>{};                           // XXX Dummy
+
+    auto sC = Layout<_1>{};  // XXX Dummy
 
     print_cute("sA", sA);
     print_cute("sB", sB);
@@ -373,7 +394,7 @@ int main() {
     thrust::device_vector<TA> deviceA = hA;
     thrust::device_vector<TB> deviceB = hB;
     thrust::host_vector<uint8_t> hC(M * N);
-    thrust::host_vector<uint8_t> sFC(M*N);
+    thrust::host_vector<uint8_t> sFC(M * N);
     thrust::device_vector<uint8_t> deviceC = hC;
     thrust::device_vector<uint8_t> deviceSFC = sFC;
 
@@ -391,19 +412,22 @@ int main() {
     auto tma_load_b = make_tma_copy_B_sm100(
         SM90_TMA_LOAD{}, tensorB, sB(_, _, _, 0), cga_tile_shape, mma);
 
-    auto mainloop_tiler = Shape<_128,_16,_64>{};
-    auto epilogue_tiler = Shape<_128,_64,_64>{};
+    auto mainloop_tiler = Shape<_128, _16, _64>{};
+    auto epilogue_tiler = Shape<_128, _64, _64>{};
     auto mA = tensorA;
     auto mB = tensorB;
     auto cluster_tile = cga_tile_shape;
 
-    Tensor gA_mk = local_tile(mA, mainloop_tiler, make_coord(_,_, _), Step<_1, X,_1>{});
-    Tensor gB_nk = local_tile(mB, cluster_tile, make_coord(_,_, _), Step< X,_1,_1>{});  // (BLK_N,BLK_K,k)
+    Tensor gA_mk =
+        local_tile(mA, mainloop_tiler, make_coord(_, _, _), Step<_1, X, _1>{});
+    Tensor gB_nk = local_tile(mB, cluster_tile, make_coord(_, _, _),
+                              Step<X, _1, _1>{});  // (BLK_N,BLK_K,k)
     print_cute("gA_mk", gA_mk);
     print_cute("gB_nk", gB_nk);
-    // Tensor gC_mn = local_tile(mC, epilogue_tiler, make_coord(_,_, _), Step<_1,_1, X>{});  // (BLK_M,BLK_N)
+    // Tensor gC_mn = local_tile(mC, epilogue_tiler, make_coord(_,_, _),
+    // Step<_1,_1, X>{});  // (BLK_M,BLK_N)
 
-        // Assert checks on tile sizes -- no predication
+    // Assert checks on tile sizes -- no predication
     // NVTE_CHECK(M % size<0>(cga_tile_shape) == 0,
     //             "Inner dimension must be divisible by ",
     //             static_cast<size_t>(size<0>(cga_tile_shape)), " but got ", M,
@@ -423,32 +447,29 @@ int main() {
     dim3 dimGrid(tiles, 1, 1);
     constexpr bool kEnableStochasticRounding = false;
     int smem_size = sizeof(SharedStorage<TA, TB, decltype(sA), decltype(sB)>);
-    auto* kernel_ptr = &rht_gemm_device<
-                                    decltype(M), decltype(N), decltype(k_tile_size), decltype(cga_tile_shape),
-                                    TA, decltype(dA), decltype(sA), decltype(tma_load_a),
-                                    TB, decltype(dB), decltype(sB), decltype(tma_load_b),
-                                    uint8_t, decltype(dC), decltype(sC),
-                                    uint8_t,
-                                    decltype(mma),
-                                    kEnableStochasticRounding>;
+    auto* kernel_ptr =
+        &rht_gemm_device<decltype(M), decltype(N), decltype(k_tile_size),
+                         decltype(cga_tile_shape), TA, decltype(dA),
+                         decltype(sA), decltype(tma_load_a), TB, decltype(dB),
+                         decltype(sB), decltype(tma_load_b), uint8_t,
+                         decltype(dC), decltype(sC), uint8_t, decltype(mma),
+                         kEnableStochasticRounding>;
 
-    bool status = cudaFuncSetAttribute(*kernel_ptr,
-                                cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                smem_size);
+    bool status = cudaFuncSetAttribute(
+        *kernel_ptr, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size);
 
     if (status != cudaSuccess) {
-    std::cerr << "Error: Failed to set Shared Memory size." << std::endl;
-    return 1;
+        std::cerr << "Error: Failed to set Shared Memory size." << std::endl;
+        return 1;
     }
-    uint8_t *C = reinterpret_cast<uint8_t*>(thrust::raw_pointer_cast(deviceC.data()));
-    uint8_t *SFC = reinterpret_cast<uint8_t*>(thrust::raw_pointer_cast(deviceSFC.data()));
-    
-    (*kernel_ptr)
-        <<< dimGrid, dimBlock, smem_size >>>
-        (M,  N,  k_tile_size, cga_tile_shape,
+    uint8_t* C =
+        reinterpret_cast<uint8_t*>(thrust::raw_pointer_cast(deviceC.data()));
+    uint8_t* SFC =
+        reinterpret_cast<uint8_t*>(thrust::raw_pointer_cast(deviceSFC.data()));
+
+    (*kernel_ptr)<<<dimGrid, dimBlock, smem_size>>>(
+        M, N, k_tile_size, cga_tile_shape,
         thrust::raw_pointer_cast(deviceA.data()), dA, sA, tma_load_a,
-        thrust::raw_pointer_cast(deviceB.data()), dB, sB, tma_load_b,
-        C, dC, sC,
-        SFC,
-        mma);
+        thrust::raw_pointer_cast(deviceB.data()), dB, sB, tma_load_b, C, dC, sC,
+        SFC, mma);
 }
