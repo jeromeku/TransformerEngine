@@ -388,10 +388,10 @@ __global__ static void rht_gemm_device(
                 // If barrier token is !BarrierStatus::WaitDone, waits on
                 // empty_barrier for current stage Else arrive_expect_tx on
                 // full_barrier
-                mainloop_pipeline.producer_acquire(mainloop_pipe_producer_state,
-                                                   barrier_token);
-                using BarrierType =
-                    typename MainloopPipeline::ProducerBarrierType;
+                // mainloop_pipeline.producer_acquire(mainloop_pipe_producer_state,
+                //                                    barrier_token);
+                // using BarrierType =
+                //     typename MainloopPipeline::ProducerBarrierType;
 
                 if (elect_one_sync()) {
                     printf(
@@ -402,9 +402,9 @@ __global__ static void rht_gemm_device(
                         mainloop_pipe_producer_state.count());
                 }
 
-                BarrierType* tma_barrier =
-                    mainloop_pipeline.producer_get_barrier(
-                        mainloop_pipe_producer_state);
+                // BarrierType* tma_barrier =
+                //     mainloop_pipeline.producer_get_barrier(
+                //         mainloop_pipe_producer_state);
 
                 int write_stage = mainloop_pipe_producer_state.index();
 
@@ -421,20 +421,20 @@ __global__ static void rht_gemm_device(
                 }
 
                 // Acquire arrival token for the next stage, non-blocking
-                barrier_token = mainloop_pipeline.producer_try_acquire(
-                    mainloop_pipe_producer_state, skip_wait);
+                // barrier_token = mainloop_pipeline.producer_try_acquire(
+                //     mainloop_pipe_producer_state, skip_wait);
 
-                if (cute::elect_one_sync()) {
-                    copy(tma_load_a.with(*tma_barrier, tma_mcast_mask_a),
-                         tAgA_mk(_, k_tile_idx_n), tAsA(_, write_stage));
-                }
+                // if (cute::elect_one_sync()) {
+                //     copy(tma_load_a.with(*tma_barrier, tma_mcast_mask_a),
+                //          tAgA_mk(_, k_tile_idx_n), tAsA(_, write_stage));
+                // }
             }
             linear_tile_idx += gridDim.x;
             tile_idx_m = linear_tile_idx % tiles_in_m;
             tile_idx_n = (linear_tile_idx / tiles_in_m) * K_TILE_MAX;
 
         } while (tile_idx_m < tiles_in_m && tile_idx_n < tiles_in_n);
-        mainloop_pipeline.producer_tail(mainloop_pipe_producer_state);
+        // mainloop_pipeline.producer_tail(mainloop_pipe_producer_state);
     }
 }
 
@@ -447,7 +447,7 @@ int main() {
     int k_tile_size = 2048;
 
     constexpr int m = 128;  // 768;   // N
-    constexpr int n = 64;   // 1024;  // M
+    constexpr int n = 1024;   // 1024;  // M
     // Define shapes (dynamic)
     auto M = static_cast<int>(m);
     auto N = static_cast<int>(n);
