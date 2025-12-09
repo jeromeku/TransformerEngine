@@ -358,8 +358,12 @@ __global__ static void rht_gemm_device(
                  tBgB(_, 0, 0), tBsB(_, 0));
         }
         cute::wait_barrier(shared_storage.tma_barrier[0], 0 /*tma_phase_bit*/);
+
         if (elect_one_sync()) {
-            printf("TMA Load B arrived...\n");
+            auto tAgA_mk = tAgA(_, 0, _);
+            print_cute("DMA WARP: Loading tAgA_mk(_,k_tile_idx_n)",
+                       tAgA_mk(_, 0));
+            print_cute("DMA WARP: Loading tAsA(_,write_stage)", tAsA(_, 0));
         }
 
         do {
@@ -372,13 +376,14 @@ __global__ static void rht_gemm_device(
 
             CUTE_NO_UNROLL
             while (k_tile < K_TILE_MAX && k_tile + tile_idx_n < tiles_in_n) {
-
                 int k_tile_idx_n = tile_idx_n + k_tile;
                 if (elect_one_sync()) {
                     printf(
-                        "tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,"
+                        "tile_idx_m, tile_idx_n, tiles_in_n, k_tile, "
+                        "k_tile_idx_n,"
                         "K_TILE_MAX: %d, %d, %d, %d, %d, %d\n",
-                        tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n, K_TILE_MAX);
+                        tile_idx_m, tile_idx_n, tiles_in_n, k_tile,
+                        k_tile_idx_n, K_TILE_MAX);
                 }
 
                 ++k_tile;
@@ -446,8 +451,8 @@ int main() {
 
     int k_tile_size = 2048;
 
-    constexpr int m = 128;  // 768;   // N
-    constexpr int n = 1024;   // 1024;  // M
+    constexpr int m = 128;   // 768;   // N
+    constexpr int n = 1024;  // 1024;  // M
     // Define shapes (dynamic)
     auto M = static_cast<int>(m);
     auto N = static_cast<int>(n);

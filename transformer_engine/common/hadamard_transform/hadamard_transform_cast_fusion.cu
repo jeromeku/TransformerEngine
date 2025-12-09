@@ -331,6 +331,12 @@ rht_gemm_device(MShape M, NShape N, KShape K, ClusterTileShape cluster_tile,
       copy(tma_load_b.with(shared_storage.tma_barrier[0], tma_mcast_mask_b), tBgB(_,0,0), tBsB(_,0));
     }
     cute::wait_barrier(shared_storage.tma_barrier[0], 0 /*tma_phase_bit*/);
+    if (elect_one_sync()){
+        auto tAgA_mk = tAgA(_,0,_);
+        print_cute("DMA WARP: Loading tAgA_mk(_,k_tile_idx_n)", tAgA_mk(_,0));
+        print_cute("DMA WARP: Loading tAsA(_,write_stage)", tAsA(_,0));
+    }
+    
     do {
       bool is_first_wave = linear_tile_idx == blockIdx.x;
       uint32_t skip_wait = is_first_wave;
@@ -345,8 +351,6 @@ rht_gemm_device(MShape M, NShape N, KShape K, ClusterTileShape cluster_tile,
         ++k_tile;
         skip_wait = (is_first_wave && k_tile < MainloopPipelineStageCount);
         
-        // If barrier token is !BarrierStatus::WaitDone, then waits on empty_barrier for current stage
-        // Else arrive_expect_tx on full_barrier
         mainloop_pipeline.producer_acquire(mainloop_pipe_producer_state, barrier_token);
         using BarrierType = typename MainloopPipeline::ProducerBarrierType;
         BarrierType* tma_barrier = mainloop_pipeline.producer_get_barrier(mainloop_pipe_producer_state);

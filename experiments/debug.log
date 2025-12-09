@@ -42,41 +42,41 @@ Sw<3,4,3> o smem_ptr[16b](unset) o (((_64,_2),(_8,_2)),_1,_4,(_1,_13)):(((_1,_51
 sB
 Sw<1,4,3> o smem_ptr[16b](unset) o ((_16,_16),_1,_1,(_1,_13)):((_1,_16),_0,_0,(_0,_256))
 gA_mk
-gmem_ptr[16b](0x9b397000000) o (_128,_64,1,1):(_1,128,_128,8192)
+gmem_ptr[16b](0xfca1b000000) o (_128,_64,1,16):(_1,128,_128,8192)
 gB_nk
-gmem_ptr[16b](0x9b397004000) o (_16,_16,1,1):(_1,16,_16,256)
+gmem_ptr[16b](0xfca1b040000) o (_16,_16,1,1):(_1,16,_16,256)
 
  ------------------------------------------------------------- 
 mA
-ArithTuple(_0,_0) o (128,64):(_1@0,_1@1)
+ArithTuple(_0,_0) o (128,1024):(_1@0,_1@1)
 mB
 ArithTuple(_0,_0) o (16,16):(_1@0,_1@1)
 mC
-subptr[4b](0x9b397004200.0) o (128,64):(64,_1)
+subptr[4b](0xfca1b040200.0) o (128,1024):(1024,_1)
 sfc_layout
-(128,((_16,_4),1)):(4,((_0,_1),_4))
+(128,((_16,_4),16)):(64,((_0,_1),_4))
 
  ------------------------------------------------------------- 
 K_TILE_MAX
-1
+16
 K_PIPE_MAX
 13
 tiles_in_m
 1
 tiles_in_n
-1
+16
 gA_mk
-ArithTuple(_0,_0) o (_128,_64,1,1):(_1@0,_1@1,_128@0,_64@1)
+ArithTuple(_0,_0) o (_128,_64,1,16):(_1@0,_1@1,_128@0,_64@1)
 gB_nk
 ArithTuple(_0,_0) o (_16,_16,1,1):(_1@0,_1@1,_16@0,_16@1)
 gC_mn
-subptr[4b](0x9b397004200.0) o (_128,_64,1,1):(64,_1,8192,_64)
+subptr[4b](0xfca1b040200.0) o (_128,_64,1,16):(1024,_1,131072,_64)
 gSFC_mn
-gmem_ptr[8b](0x9b397006200) o (_128,(_16,_4),1,1):(4,(_0,_1),512,_4)
+gmem_ptr[8b](0xfca1b060200) o (_128,(_16,_4),1,16):(64,(_0,_1),8192,_4)
 tCsA
-Sw<3,4,3>_smem_ptr[16b](0x9b400000580) o (((_64,_2),(_8,_2)),_1,_4,(_1,_13)):(((_1,_512),(_64,_1024)),_0,_2048,(_0,_8192))
+Sw<3,4,3>_smem_ptr[16b](0xfcb00000580) o (((_64,_2),(_8,_2)),_1,_4,(_1,_13)):(((_1,_512),(_64,_1024)),_0,_2048,(_0,_8192))
 tCsB
-Sw<1,4,3>_smem_ptr[16b](0x9b400034580) o ((_16,_16),_1,_1,(_1,_13)):((_1,_16),_0,_0,(_0,_256))
+Sw<1,4,3>_smem_ptr[16b](0xfcb00034580) o ((_16,_16),_1,_1,(_1,_13)):((_1,_16),_0,_0,(_0,_256))
 
  ------------------------------------------------------------- 
 thr_mma
@@ -119,7 +119,7 @@ MMA_Atom
   LayoutC_TV: (_1,(_128,_64)):(_0,(_1,_128))
 
 tCgA
-ArithTuple(_0,_0) o ((_128,_16),_1,_4,1,1):((_1@0,_1@1),_0,_16@1,_128@0,_64@1)
+ArithTuple(_0,_0) o ((_128,_16),_1,_4,1,16):((_1@0,_1@1),_0,_16@1,_128@0,_64@1)
 tCrA
 UMMA::DescriptorIterator o (_1,_1,_4,(_1,_13)):(_0,_0,_256,(_0,_1024))
 tCrB
@@ -139,9 +139,9 @@ tmem_[32b](0x0000.0000) o ((_128,_64),_1,_1,_4):((_65536,_1),_0,_0,_64)
 
  ------------------------------------------------------------- 
 tAgA
-ArithTuple(_0,_0) o (((_64,_8),(_2,_8)),1,1):(((_1@0,_1@1),(_64@0,_8@1)),_128@0,_64@1)
+ArithTuple(_0,_0) o (((_64,_8),(_2,_8)),1,16):(((_1@0,_1@1),(_64@0,_8@1)),_128@0,_64@1)
 tAsA
-Sw<3,4,3>_smem_ptr[16b](0x9b400000580) o ((_512,_16),(_1,_13)):((_1,_512),(_0,_8192))
+Sw<3,4,3>_smem_ptr[16b](0xfcb00000580) o ((_512,_16),(_1,_13)):((_1,_512),(_0,_8192))
 tBgB
 ArithTuple(_0,_0) o (((_16,_16),_1),1,1):(((_1@0,_1@1),_0),_16@0,_16@1)
 tBsB
@@ -149,4 +149,55 @@ ArithTuple(_0,_0) o (((_16,_16),_1),1,1):(((_1@0,_1@1),_0),_16@0,_16@1)
 AtomThrShapeMNK
 (_1,_1,_1)
 Initialize TMA Load B...
-TMA Load B arrived...
+DMA WARP: Loading tAgA_mk(_,k_tile_idx_n)
+ArithTuple(0,0) o (((_64,_8),(_2,_8))):(((_1@0,_1@1),(_64@0,_8@1)))
+DMA WARP: Loading tAsA(_,write_stage)
+Sw<3,4,3>_smem_ptr[16b](0xfcb00000580) o ((_512,_16)):((_1,_512))
+tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 0, 16, 0, 0, 16
+Mainloop producer getting barrier for stage, phase, count: 0 1 0
+Mainloop producer acquiring arrival token for stage, phase, count: 1 1 1
+tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 0, 16, 1, 1, 16
+Mainloop producer getting barrier for stage, phase, count: 1 1 1
+Mainloop producer acquiring arrival token for stage, phase, count: 2 1 2
+tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 0, 16, 2, 2, 16
+Mainloop producer getting barrier for stage, phase, count: 2 1 2
+Mainloop producer acquiring arrival token for stage, phase, count: 3 1 3
+tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 0, 16, 3, 3, 16
+Mainloop producer getting barrier for stage, phase, count: 3 1 3
+Mainloop producer acquiring arrival token for stage, phase, count: 4 1 4
+tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 0, 16, 4, 4, 16
+Mainloop producer getting barrier for stage, phase, count: 4 1 4
+Mainloop producer acquiring arrival token for stage, phase, count: 5 1 5
+tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 0, 16, 5, 5, 16
+Mainloop producer getting barrier for stage, phase, count: 5 1 5
+Mainloop producer acquiring arrival token for stage, phase, count: 6 1 6
+tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 0, 16, 6, 6, 16
+Mainloop producer getting barrier for stage, phase, count: 6 1 6
+Mainloop producer acquiring arrival token for stage, phase, count: 7 1 7
+tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 0, 16, 7, 7, 16
+Mainloop producer getting barrier for stage, phase, count: 7 1 7
+Mainloop producer acquiring arrival token for stage, phase, count: 8 1 8
+tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 0, 16, 8, 8, 16
+Mainloop producer getting barrier for stage, phase, count: 8 1 8
+Mainloop producer acquiring arrival token for stage, phase, count: 9 1 9
+tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 0, 16, 9, 9, 16
+Mainloop producer getting barrier for stage, phase, count: 9 1 9
+Mainloop producer acquiring arrival token for stage, phase, count: 10 1 10
+tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 0, 16, 10, 10, 16
+Mainloop producer getting barrier for stage, phase, count: 10 1 10
+Mainloop producer acquiring arrival token for stage, phase, count: 11 1 11
+tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 0, 16, 11, 11, 16
+Mainloop producer getting barrier for stage, phase, count: 11 1 11
+Mainloop producer acquiring arrival token for stage, phase, count: 12 1 12
+tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 0, 16, 12, 12, 16
+Mainloop producer getting barrier for stage, phase, count: 12 1 12
+Mainloop producer acquiring arrival token for stage, phase, count: 0 0 13
+tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 0, 16, 13, 13, 16
+Mainloop producer getting barrier for stage, phase, count: 0 0 13
+Mainloop producer acquiring arrival token for stage, phase, count: 1 0 14
+tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 0, 16, 14, 14, 16
+Mainloop producer getting barrier for stage, phase, count: 1 0 14
+Mainloop producer acquiring arrival token for stage, phase, count: 2 0 15
+tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 0, 16, 15, 15, 16
+Mainloop producer getting barrier for stage, phase, count: 2 0 15
+Mainloop producer acquiring arrival token for stage, phase, count: 3 0 16
