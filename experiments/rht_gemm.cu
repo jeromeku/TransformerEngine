@@ -221,6 +221,16 @@ __global__ static void rht_gemm_device(
     Tensor tCrA = thr_mma.make_fragment_A(tCsA);  // (MMA,MMA_M,MMA_K,PIPE)
     Tensor tCrB = thr_mma.make_fragment_B(tCsB);  // (MMA,MMA_M,MMA_K,PIPE)
 
+    if (thread0()) {
+        PRINT_DELIMITER
+        print_cute("thr_mma", thr_mma);
+        print_cute("tCgB", tCgB);
+        print_cute("mma_epilogue", mma_epilogue);
+        print_cute("thr_mma_epilogue", thr_mma_epilogue);
+        print_cute("tCgA", tCgA);
+        print_cute("tCrA", tCrA);
+        print_cute("tCrB", tCrB);
+    }
     auto acc_shape_mma =
         partition_shape_C(TiledMMA{}, take<0, 2>(ClusterTileShape{}));
     auto acc_shape_epilogue =
@@ -231,6 +241,13 @@ __global__ static void rht_gemm_device(
 
     auto bulk_tmem_epilogue = TiledMmaEpilogue::make_fragment_C(
         append(acc_shape_epilogue, Int<AccumulatorPipelineStageCount / 4>{}));
+    if (thread0()) {
+        PRINT_DELIMITER
+        print_cute("acc_shape_mma", acc_shape_mma);
+        print_cute("acc_shape_epilogue", acc_shape_epilogue);
+        print_cute("bulk_tmem_mma", bulk_tmem_mma);
+        print_cute("bulk_tmem_epilogue", bulk_tmem_epilogue);
+    }
 }
 
 int main() {
