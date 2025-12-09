@@ -233,6 +233,7 @@ __global__ static void rht_gemm_device(
     }
     auto acc_shape_mma =
         partition_shape_C(TiledMMA{}, take<0, 2>(ClusterTileShape{}));
+    auto acc_shape_mma2 = partition_shape_C(TiledMMA{}, Shape<_128, _32>{});
     auto acc_shape_epilogue =
         partition_shape_C(TiledMmaEpilogue{}, take<0, 2>(epilogue_tiler));
 
@@ -244,6 +245,7 @@ __global__ static void rht_gemm_device(
     if (thread0()) {
         PRINT_DELIMITER
         print_cute("acc_shape_mma", acc_shape_mma);
+        print_cute("acc_shape_mma2", acc_shape_mma2);
         print_cute("acc_shape_epilogue", acc_shape_epilogue);
         print_cute("bulk_tmem_mma", bulk_tmem_mma);
         print_cute("bulk_tmem_epilogue", bulk_tmem_epilogue);
@@ -273,6 +275,7 @@ __global__ static void rht_gemm_device(
         print_cute("tAsA", tAsA);
         print_cute("tBgB", tBgB);
         print_cute("tBsB", tBgB);
+        print_cute("AtomThrShapeMNK", AtomThrShapeMNK{});
     }
 
     uint16_t tma_mcast_mask_a =
@@ -285,6 +288,113 @@ __global__ static void rht_gemm_device(
     bool is_mma_warp = (warp_idx == 0);
     bool is_dma_warp = (warp_idx == 1);
     bool is_epilogue_warp = (warp_idx >= 4 && warp_idx <= 7);
+
+    typename MainloopPipeline::Params mainloop_pipeline_params;
+    if (is_dma_warp) {
+        mainloop_pipeline_params.role =
+            MainloopPipeline::ThreadCategory::Producer;
+    }
+    if (is_mma_warp) {
+        mainloop_pipeline_params.role =
+            MainloopPipeline::ThreadCategory::Consumer;
+    }
+    mainloop_pipeline_params.is_leader = cute::elect_one_sync() && is_dma_warp;
+    mainloop_pipeline_params.transaction_bytes = kTmaTransactionBytes;
+    mainloop_pipeline_params.initializing_warp = 0;
+    MainloopPipeline mainloop_pipeline(
+        shared_storage.mainloop, mainloop_pipeline_params, cluster_shape,
+        cute::true_type{},   // Perform barrier init
+        cute::true_type{});  // Delay mask calculation
+
+    MainloopPipelineState mainloop_pipe_consumer_state;
+    MainloopPipelineState mainloop_pipe_producer_state =
+        cutlass::make_producer_start_state<MainloopPipeline>();
+
+    using AccumulatorPipeline =
+        cutlass::PipelineUmmaAsync<AccumulatorPipelineStageCount / 4,
+                                   AtomThrShapeMNK>;
+    using AccumulatorPipelineState =
+        typename AccumulatorPipeline::PipelineState;
+
+    AccumulatorPipelineState accumulator_pipe_consumer_state;
+    AccumulatorPipelineState accumulator_pipe_producer_state =
+        cutlass::make_producer_start_state<AccumulatorPipeline>();
+
+    typename AccumulatorPipeline::Params accumulator_pipeline_params;
+    if (is_mma_warp) {
+        accumulator_pipeline_params.role =
+            AccumulatorPipeline::ThreadCategory::Producer;
+    }
+    if (is_epilogue_warp) {
+        accumulator_pipeline_params.role =
+            AccumulatorPipeline::ThreadCategory::Consumer;
+    }
+    // Only one producer thread arrives on this barrier.
+    accumulator_pipeline_params.producer_arv_count = 1;
+    accumulator_pipeline_params.consumer_arv_count =
+        size(AtomThrShapeMNK{}) * 128;
+    accumulator_pipeline_params.initializing_warp = 1;
+    AccumulatorPipeline accumulator_pipeline(
+        shared_storage.accumulator, accumulator_pipeline_params, cluster_shape,
+        cute::true_type{},   // Perform barrier init
+        cute::true_type{});  // Delay mask calculation
+    if (warp_idx == 2 && elect_one_sync()) {
+        cute::initialize_barrier(shared_storage.tma_barrier[0],
+                                 /* num_threads */ 1);
+    }
+    __syncthreads();
+    using TMEM_LOAD_NEW = cute::SM100::TMEM::LOAD::SM100_TMEM_LOAD_32dp32b64x;
+
+    if (is_dma_warp) {
+        if (elect_one_sync()) {
+            printf("Initialize TMA Load B...\n");
+            cute::set_barrier_transaction_bytes(shared_storage.tma_barrier[0],
+                                                kTmaRhtTensorTransactionBytes);
+            copy(tma_load_b.with(shared_storage.tma_barrier[0],
+                                 tma_mcast_mask_b),
+                 tBgB(_, 0, 0), tBsB(_, 0));
+        }
+        cute::wait_barrier(shared_storage.tma_barrier[0], 0 /*tma_phase_bit*/);
+        if(elect_one_sync()){
+            printf("TMA Load B arrived...\n");
+        }
+
+        // do {
+        //     bool is_first_wave = linear_tile_idx == blockIdx.x;
+        //     uint32_t skip_wait = is_first_wave;
+        //     auto tAgA_mk = tAgA(_, tile_idx_m, _);
+        //     int k_tile = 0;
+        //     auto barrier_token = mainloop_pipeline.producer_try_acquire(
+        //         mainloop_pipe_producer_state, skip_wait);
+
+        //     CUTE_NO_UNROLL
+        //     while (k_tile < K_TILE_MAX && k_tile + tile_idx_n < tiles_in_n) {
+        //         int k_tile_idx_n = tile_idx_n + k_tile;
+        //         ++k_tile;
+        //         skip_wait =
+        //             (is_first_wave && k_tile < MainloopPipelineStageCount);
+        //         mainloop_pipeline.producer_acquire(mainloop_pipe_producer_state,
+        //                                            barrier_token);
+        //         using BarrierType =
+        //             typename MainloopPipeline::ProducerBarrierType;
+        //         BarrierType* tma_barrier =
+        //             mainloop_pipeline.producer_get_barrier(
+        //                 mainloop_pipe_producer_state);
+        //         int write_stage = mainloop_pipe_producer_state.index();
+        //         ++mainloop_pipe_producer_state;
+        //         barrier_token = mainloop_pipeline.producer_try_acquire(
+        //             mainloop_pipe_producer_state, skip_wait);
+        //         if (cute::elect_one_sync()) {
+        //             copy(tma_load_a.with(*tma_barrier, tma_mcast_mask_a),
+        //                  tAgA_mk(_, k_tile_idx_n), tAsA(_, write_stage));
+        //         }
+        //     }
+        //     linear_tile_idx += gridDim.x;
+        //     tile_idx_m = linear_tile_idx % tiles_in_m;
+        //     tile_idx_n = (linear_tile_idx / tiles_in_m) * K_TILE_MAX;
+        // } while (tile_idx_m < tiles_in_m && tile_idx_n < tiles_in_n);
+        // mainloop_pipeline.producer_tail(mainloop_pipe_producer_state);
+    }
 }
 
 int main() {
