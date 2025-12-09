@@ -156,6 +156,9 @@ __global__ static void rht_gemm_device(
     dim3 cluster_coord_in_grid = cluster_id_in_grid();
 
     // Total number of k-tiles
+    // K = k_tile_size is heuristically chosen, defaults to 2048
+    // K_TILE_MAX determines the "stride" along columns (N) in groups of 64 cols
+    // Each
     const int K_TILE_MAX = min(N, K) / 64;
     uint32_t tiles_in_m =
         (M + size<0>(cluster_tile) - 1) / size<0>(cluster_tile);
@@ -355,45 +358,83 @@ __global__ static void rht_gemm_device(
                  tBgB(_, 0, 0), tBsB(_, 0));
         }
         cute::wait_barrier(shared_storage.tma_barrier[0], 0 /*tma_phase_bit*/);
-        if(elect_one_sync()){
+        if (elect_one_sync()) {
             printf("TMA Load B arrived...\n");
         }
 
-        // do {
-        //     bool is_first_wave = linear_tile_idx == blockIdx.x;
-        //     uint32_t skip_wait = is_first_wave;
-        //     auto tAgA_mk = tAgA(_, tile_idx_m, _);
-        //     int k_tile = 0;
-        //     auto barrier_token = mainloop_pipeline.producer_try_acquire(
-        //         mainloop_pipe_producer_state, skip_wait);
+        do {
+            bool is_first_wave = linear_tile_idx == blockIdx.x;
+            uint32_t skip_wait = is_first_wave;
+            auto tAgA_mk = tAgA(_, tile_idx_m, _);
+            int k_tile = 0;
+            auto barrier_token = mainloop_pipeline.producer_try_acquire(
+                mainloop_pipe_producer_state, skip_wait);
 
-        //     CUTE_NO_UNROLL
-        //     while (k_tile < K_TILE_MAX && k_tile + tile_idx_n < tiles_in_n) {
-        //         int k_tile_idx_n = tile_idx_n + k_tile;
-        //         ++k_tile;
-        //         skip_wait =
-        //             (is_first_wave && k_tile < MainloopPipelineStageCount);
-        //         mainloop_pipeline.producer_acquire(mainloop_pipe_producer_state,
-        //                                            barrier_token);
-        //         using BarrierType =
-        //             typename MainloopPipeline::ProducerBarrierType;
-        //         BarrierType* tma_barrier =
-        //             mainloop_pipeline.producer_get_barrier(
-        //                 mainloop_pipe_producer_state);
-        //         int write_stage = mainloop_pipe_producer_state.index();
-        //         ++mainloop_pipe_producer_state;
-        //         barrier_token = mainloop_pipeline.producer_try_acquire(
-        //             mainloop_pipe_producer_state, skip_wait);
-        //         if (cute::elect_one_sync()) {
-        //             copy(tma_load_a.with(*tma_barrier, tma_mcast_mask_a),
-        //                  tAgA_mk(_, k_tile_idx_n), tAsA(_, write_stage));
-        //         }
-        //     }
-        //     linear_tile_idx += gridDim.x;
-        //     tile_idx_m = linear_tile_idx % tiles_in_m;
-        //     tile_idx_n = (linear_tile_idx / tiles_in_m) * K_TILE_MAX;
-        // } while (tile_idx_m < tiles_in_m && tile_idx_n < tiles_in_n);
-        // mainloop_pipeline.producer_tail(mainloop_pipe_producer_state);
+            CUTE_NO_UNROLL
+            while (k_tile < K_TILE_MAX && k_tile + tile_idx_n < tiles_in_n) {
+
+                int k_tile_idx_n = tile_idx_n + k_tile;
+                if (elect_one_sync()) {
+                    printf(
+                        "tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,"
+                        "K_TILE_MAX: %d, %d, %d, %d, %d, %d\n",
+                        tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n, K_TILE_MAX);
+                }
+
+                ++k_tile;
+                skip_wait =
+                    (is_first_wave && k_tile < MainloopPipelineStageCount);
+
+                // If barrier token is !BarrierStatus::WaitDone, waits on
+                // empty_barrier for current stage Else arrive_expect_tx on
+                // full_barrier
+                mainloop_pipeline.producer_acquire(mainloop_pipe_producer_state,
+                                                   barrier_token);
+                using BarrierType =
+                    typename MainloopPipeline::ProducerBarrierType;
+
+                if (elect_one_sync()) {
+                    printf(
+                        "Mainloop producer getting barrier for stage, phase, "
+                        "count: %d %d %d\n",
+                        mainloop_pipe_producer_state.index(),
+                        mainloop_pipe_producer_state.phase(),
+                        mainloop_pipe_producer_state.count());
+                }
+
+                BarrierType* tma_barrier =
+                    mainloop_pipeline.producer_get_barrier(
+                        mainloop_pipe_producer_state);
+
+                int write_stage = mainloop_pipe_producer_state.index();
+
+                // Advance write stage
+                ++mainloop_pipe_producer_state;
+
+                if (elect_one_sync()) {
+                    printf(
+                        "Mainloop producer acquiring arrival token for stage, "
+                        "phase, count: %d %d %d\n",
+                        mainloop_pipe_producer_state.index(),
+                        mainloop_pipe_producer_state.phase(),
+                        mainloop_pipe_producer_state.count());
+                }
+
+                // Acquire arrival token for the next stage, non-blocking
+                barrier_token = mainloop_pipeline.producer_try_acquire(
+                    mainloop_pipe_producer_state, skip_wait);
+
+                if (cute::elect_one_sync()) {
+                    copy(tma_load_a.with(*tma_barrier, tma_mcast_mask_a),
+                         tAgA_mk(_, k_tile_idx_n), tAsA(_, write_stage));
+                }
+            }
+            linear_tile_idx += gridDim.x;
+            tile_idx_m = linear_tile_idx % tiles_in_m;
+            tile_idx_n = (linear_tile_idx / tiles_in_m) * K_TILE_MAX;
+
+        } while (tile_idx_m < tiles_in_m && tile_idx_n < tiles_in_n);
+        mainloop_pipeline.producer_tail(mainloop_pipe_producer_state);
     }
 }
 
@@ -405,8 +446,8 @@ int main() {
 
     int k_tile_size = 2048;
 
-    constexpr int m = 768;   // N
-    constexpr int n = 1024;  // M
+    constexpr int m = 128;  // 768;   // N
+    constexpr int n = 64;   // 1024;  // M
     // Define shapes (dynamic)
     auto M = static_cast<int>(m);
     auto N = static_cast<int>(n);

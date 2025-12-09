@@ -344,6 +344,9 @@ rht_gemm_device(MShape M, NShape N, KShape K, ClusterTileShape cluster_tile,
         int k_tile_idx_n = tile_idx_n + k_tile;
         ++k_tile;
         skip_wait = (is_first_wave && k_tile < MainloopPipelineStageCount);
+        
+        // If barrier token is !BarrierStatus::WaitDone, then waits on empty_barrier for current stage
+        // Else arrive_expect_tx on full_barrier
         mainloop_pipeline.producer_acquire(mainloop_pipe_producer_state, barrier_token);
         using BarrierType = typename MainloopPipeline::ProducerBarrierType;
         BarrierType* tma_barrier = mainloop_pipeline.producer_get_barrier(mainloop_pipe_producer_state);
