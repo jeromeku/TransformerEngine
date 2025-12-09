@@ -98,6 +98,7 @@ __global__ static void rht_gemm_device(
     using TC = cute::float_e2m1_t;
     using TSFC = cute::float_e4m3_t;
 
+    // ClusterTileShape : cga_tile_shape: 128 x 16 x 16
     // static constexpr bool kApplyStochasticRounding = true;
     using ElementAccumulator = float;
     static constexpr int K_PIPE_MAX = size<3>(ASmemLayout{});
@@ -198,7 +199,6 @@ __global__ static void rht_gemm_device(
         print_cute("gSFC_mn", gSFC_mn);
         print_cute("tCsA", tCsA);
         print_cute("tCsB", tCsB);
-
     }
 
     //
@@ -248,6 +248,43 @@ __global__ static void rht_gemm_device(
         print_cute("bulk_tmem_mma", bulk_tmem_mma);
         print_cute("bulk_tmem_epilogue", bulk_tmem_epilogue);
     }
+    TmemAllocator tmem_allocator{};
+    cutlass::arch::NamedBarrier tmem_allocation_result_barrier(
+        32 + 128, cutlass::arch::ReservedNamedBarriers::TmemAllocBarrier);
+
+    Layout cta_layout_mnk = make_layout(cluster_shape);
+    Layout cta_layout_vmnk =
+        tiled_divide(cta_layout_mnk, make_tile(typename TiledMMA::AtomThrID{}));
+    auto cta_coord_vmnk = cta_layout_vmnk.get_flat_coord(block_rank_in_cluster);
+
+    auto [tAgA, tAsA] =
+        tma_partition(tma_load_a, get<2>(cta_coord_vmnk),
+                      make_layout(size<2>(cta_layout_vmnk)),
+                      group_modes<0, 3>(tCsA), group_modes<0, 3>(tCgA));
+
+    auto [tBgB, tBsB] =
+        tma_partition(tma_load_b, get<1>(cta_coord_vmnk),
+                      make_layout(size<1>(cta_layout_vmnk)),
+                      group_modes<0, 3>(tCsB), group_modes<0, 3>(tCgB));
+
+    if (thread0()) {
+        PRINT_DELIMITER
+        print_cute("tAgA", tAgA);
+        print_cute("tAsA", tAsA);
+        print_cute("tBgB", tBgB);
+        print_cute("tBsB", tBgB);
+    }
+
+    uint16_t tma_mcast_mask_a =
+        create_tma_multicast_mask<2>(cta_layout_vmnk, cta_coord_vmnk);
+    uint16_t tma_mcast_mask_b =
+        create_tma_multicast_mask<1>(cta_layout_vmnk, cta_coord_vmnk);
+
+    int warp_idx = cutlass::canonical_warp_idx_sync();
+
+    bool is_mma_warp = (warp_idx == 0);
+    bool is_dma_warp = (warp_idx == 1);
+    bool is_epilogue_warp = (warp_idx >= 4 && warp_idx <= 7);
 }
 
 int main() {
