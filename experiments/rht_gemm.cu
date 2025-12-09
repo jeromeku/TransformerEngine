@@ -81,8 +81,8 @@ struct SharedStorage {
 template <class MShape, class NShape, class KShape, class ClusterTileShape,
           class TA, class AStride, class ASmemLayout, class TmaLoadA,
           class TB, class BStride, class BSmemLayout, class TmaLoadB,
-          class TC, class CStride, class CSmemLayout,
-          class TSFC,
+          class TC_, class CStride, class CSmemLayout,
+          class TSFC_,
           class TiledMMA,
           bool kEnableStochasticRounding = false>
 __global__ static
@@ -90,13 +90,16 @@ void
 rht_gemm_device(MShape M, NShape N, KShape K, ClusterTileShape cluster_tile,
             TA const* A, AStride dA, ASmemLayout sAlayout, CUTE_GRID_CONSTANT TmaLoadA const tma_load_a,
             TB const* B, BStride dB, BSmemLayout sBlayout, CUTE_GRID_CONSTANT TmaLoadB const tma_load_b,
-            TC      * C, CStride dC, CSmemLayout         ,
-            TSFC    * SFC,
+            TC_      * C, CStride dC, CSmemLayout         ,
+            TSFC_    * SFC,
             TiledMMA mma)
             // float const* global_amax,
             // const size_t* rng_state)
 {
   using X = Underscore;
+  using TC = cute::float_e2m1_t;
+  using TSFC = cute::float_e4m3_t;
+
   // static constexpr bool kApplyStochasticRounding = true;
   using ElementAccumulator = float;
   static constexpr int K_PIPE_MAX = size<3>(ASmemLayout{});
@@ -369,10 +372,10 @@ int main() {
     thrust::host_vector<TB> hB(16 * 16);
     thrust::device_vector<TA> deviceA = hA;
     thrust::device_vector<TB> deviceB = hB;
-    thrust::host_vector<TC> hC(M * N);
-    thrust::host_vector<TSFC> sFC(M*N);
-    thrust::device_vector<TA> deviceC = hC;
-    thrust::device_vector<TB> deviceSFC = sFC;
+    thrust::host_vector<uint8_t> hC(M * N);
+    thrust::host_vector<uint8_t> sFC(M*N);
+    thrust::device_vector<uint8_t> deviceC = hC;
+    thrust::device_vector<uint8_t> deviceSFC = sFC;
 
     Tensor tensorA =
         make_tensor(make_gmem_ptr(thrust::raw_pointer_cast(deviceA.data())),
@@ -424,8 +427,8 @@ int main() {
                                     decltype(M), decltype(N), decltype(k_tile_size), decltype(cga_tile_shape),
                                     TA, decltype(dA), decltype(sA), decltype(tma_load_a),
                                     TB, decltype(dB), decltype(sB), decltype(tma_load_b),
-                                    TC, decltype(dC), decltype(sC),
-                                    TSFC,
+                                    uint8_t, decltype(dC), decltype(sC),
+                                    uint8_t,
                                     decltype(mma),
                                     kEnableStochasticRounding>;
 
@@ -437,12 +440,15 @@ int main() {
     std::cerr << "Error: Failed to set Shared Memory size." << std::endl;
     return 1;
     }
+    uint8_t *C = reinterpret_cast<uint8_t*>(thrust::raw_pointer_cast(deviceC.data()));
+    uint8_t *SFC = reinterpret_cast<uint8_t*>(thrust::raw_pointer_cast(deviceSFC.data()));
+    
     (*kernel_ptr)
         <<< dimGrid, dimBlock, smem_size >>>
         (M,  N,  k_tile_size, cga_tile_shape,
         thrust::raw_pointer_cast(deviceA.data()), dA, sA, tma_load_a,
         thrust::raw_pointer_cast(deviceB.data()), dB, sB, tma_load_b,
-        thrust::raw_pointer_cast(deviceC.data()), dC, sC,
-        thrust::raw_pointer_cast(deviceSFC.data()),
+        C, dC, sC,
+        SFC,
         mma);
 }
