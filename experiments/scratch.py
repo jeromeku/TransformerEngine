@@ -126,9 +126,7 @@ def gemm(
 
     return A @ B
 
-
 def qgemm(
-    self,
     qx: torch.Tensor,
     qw: torch.Tensor,
     out_dtype: torch.dtype,

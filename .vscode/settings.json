@@ -1,0 +1,24 @@
+{
+    // ... your existing settings ...
+    "claudeCode.environmentVariables": [
+        {
+            "name": "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
+            "value": "100000"
+        },
+    ],
+    
+    "editor.detectIndentation": false,
+    "editor.useEditorConfig": false,
+
+    "C_Cpp.vcFormat.indent.accessSpecifiers": true,
+
+    //   "[cpp]": {
+    //     "editor.tabSize": 4,
+    //     "editor.insertSpaces": true
+    //   },
+    //   "[c]": {
+    //     "editor.tabSize": 4,
+    //     "editor.insertSpaces": true
+    // },
+    // "editor.detectIndentation": false
+}
