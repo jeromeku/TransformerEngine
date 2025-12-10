@@ -331,11 +331,6 @@ rht_gemm_device(MShape M, NShape N, KShape K, ClusterTileShape cluster_tile,
       copy(tma_load_b.with(shared_storage.tma_barrier[0], tma_mcast_mask_b), tBgB(_,0,0), tBsB(_,0));
     }
     cute::wait_barrier(shared_storage.tma_barrier[0], 0 /*tma_phase_bit*/);
-    if (elect_one_sync()){
-        auto tAgA_mk = tAgA(_,0,_);
-        print_cute("DMA WARP: Loading tAgA_mk(_,k_tile_idx_n)", tAgA_mk(_,0));
-        print_cute("DMA WARP: Loading tAsA(_,write_stage)", tAsA(_,0));
-    }
     
     do {
       bool is_first_wave = linear_tile_idx == blockIdx.x;
@@ -371,6 +366,7 @@ rht_gemm_device(MShape M, NShape N, KShape K, ClusterTileShape cluster_tile,
 
     tmem_allocator.allocate(TmemAllocator::Sm100TmemCapacityColumns, &shared_storage.tmem_base_ptr);
     __syncwarp();
+    // this is a bar.arrive with a reserved named barrier (TmemAllocBarrier)
     tmem_allocation_result_barrier.arrive();
     uint32_t tmem_base_ptr = shared_storage.tmem_base_ptr;
     bulk_tmem_mma.data() = tmem_base_ptr;
@@ -417,6 +413,7 @@ rht_gemm_device(MShape M, NShape N, KShape K, ClusterTileShape cluster_tile,
     const float global_amax_val = *global_amax;
     static constexpr int FragmentSize = 256 / sizeof_bits_v<TC>;
 
+    // this is a barrier.sync
     tmem_allocation_result_barrier.arrive_and_wait();
     uint32_t tmem_base_ptr = shared_storage.tmem_base_ptr;
     bulk_tmem_epilogue.data() = tmem_base_ptr;
