@@ -508,16 +508,16 @@ __global__ static void rht_gemm_device(
                 if (elect_one_sync()) {
                     PRINT_DELIMITER
                     printf(
-                        "Mma warp pipe consumer stage, "
+                        "Mma warp MainloopPipe CONSUMER stage, "
                         "phase, count: %d %d %d %d\n",
                         mainloop_pipe_consumer_state.index(),
                         mainloop_pipe_consumer_state.phase(),
                         mainloop_pipe_consumer_state.count(),
                         MainloopPipelineState::Stages);
                     printf(
-                        "tile_idx_m, tile_idx_n, k_tile"
-                        ": %d, %d, %d\n",
-                        tile_idx_m, tile_idx_n, k_tile);
+                        "tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX"
+                        ": %d, %d, %d, %d\n",
+                        tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX);
                     print_cute("tCrA_mk", tCrA_mk);
                     print_cute("tCrB_nk", tCrB_nk);
                     printf("size<2>(tCrA) / 4: %d\n", size<2>(tCrA) / 4);
@@ -527,13 +527,14 @@ __global__ static void rht_gemm_device(
                 for (int k_block = 0; k_block < size<2>(tCrA) / 4; ++k_block) {
                     if (elect_one_sync()) {
                         printf(
-                            "Mma warp accumulator pipe stage, "
-                            "phase, count, stages: %d, %d, %d, %d\n",
+                            "k_block %d :: Mma warp Accumulator pipe PRODUCER stage, "
+                            "phase, count, stages: %d, %d, %d, %d\n", k_block,
                             accumulator_pipe_producer_state.index(),
                             accumulator_pipe_producer_state.phase(),
                             accumulator_pipe_producer_state.count(),
                             AccumulatorPipelineState::Stages);
                     }
+                    PRINT_ONE_THREAD(printf("Mma warp acquiring accumulator pipeline...\n"););
                     accumulator_pipeline.producer_acquire(
                         accumulator_pipe_producer_state);
                     CUTE_UNROLL
@@ -544,11 +545,14 @@ __global__ static void rht_gemm_device(
                         gemm(mma, tCrA_mk(_, _, k_block * 4 + i), tCrB_nk,
                              accumulators);
                     }
+                    // Issues a umma_arrive (commit) tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64
+                    PRINT_ONE_THREAD(printf("Committing mma for k_block k_tile: %d, %d\n", k_block, k_tile);)
 
                     accumulator_pipeline.producer_commit(
                         accumulator_pipe_producer_state);
                     ++accumulator_pipe_producer_state;
                 }
+
                 auto curr_mainloop_pipe_consumer_state =
                     mainloop_pipe_consumer_state;
                 ++mainloop_pipe_consumer_state;
