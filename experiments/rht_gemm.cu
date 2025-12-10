@@ -520,6 +520,10 @@ __global__ static void rht_gemm_device(
                         tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX);
                     print_cute("tCrA_mk", tCrA_mk);
                     print_cute("tCrB_nk", tCrB_nk);
+                    print_cute("tCrA_mk(_, _, k_block * 4 + i) layout", tCrA_mk(_, _, 0).layout());
+                    auto A = tCrA_mk(_, _, 0);
+                    printf("decltype(size<0>(A))::value: %d\n", decltype(size<0>(A))::value);
+                    printf("decltype(size<0>(A))::value: %d\n", decltype(size<0>(tCrB_nk))::value);
                     printf("size<2>(tCrA) / 4: %d\n", size<2>(tCrA) / 4);
                 }
 
