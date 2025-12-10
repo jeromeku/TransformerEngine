@@ -361,6 +361,7 @@ __global__ static void rht_gemm_device(
 
         if (elect_one_sync()) {
             auto tAgA_mk = tAgA(_, 0, _);
+            PRINT_DELIMITER
             print_cute("DMA WARP: Loading tAgA_mk(_,k_tile_idx_n)",
                        tAgA_mk(_, 0));
             print_cute("DMA WARP: Loading tAsA(_,write_stage)", tAsA(_, 0));
@@ -374,6 +375,13 @@ __global__ static void rht_gemm_device(
             auto barrier_token = mainloop_pipeline.producer_try_acquire(
                 mainloop_pipe_producer_state, skip_wait);
 
+            if (elect_one_sync()) {
+                PRINT_DELIMITER
+                printf(
+                    "tile_idx_m, tile_idx_n, tiles_in_m, tiles_in_n, K_TILE_MAX: %d, %d, "
+                    "%d, %d, %d\n", tile_idx_m, tile_idx_n, tiles_in_m, tiles_in_n, K_TILE_MAX);
+            }
+            
             CUTE_NO_UNROLL
             while (k_tile < K_TILE_MAX && k_tile + tile_idx_n < tiles_in_n) {
                 int k_tile_idx_n = tile_idx_n + k_tile;
