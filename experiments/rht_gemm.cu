@@ -381,11 +381,12 @@ __global__ static void rht_gemm_device(
                     "tile_idx_m, tile_idx_n, tiles_in_m, tiles_in_n, K_TILE_MAX: %d, %d, "
                     "%d, %d, %d\n", tile_idx_m, tile_idx_n, tiles_in_m, tiles_in_n, K_TILE_MAX);
             }
-            
+
             CUTE_NO_UNROLL
             while (k_tile < K_TILE_MAX && k_tile + tile_idx_n < tiles_in_n) {
                 int k_tile_idx_n = tile_idx_n + k_tile;
                 if (elect_one_sync()) {
+                    PRINT_DELIMITER
                     printf(
                         "tile_idx_m, tile_idx_n, tiles_in_n, k_tile, "
                         "k_tile_idx_n,"
@@ -431,6 +432,7 @@ __global__ static void rht_gemm_device(
                         mainloop_pipe_producer_state.index(),
                         mainloop_pipe_producer_state.phase(),
                         mainloop_pipe_producer_state.count());
+                    PRINT_DELIMITER
                 }
 
                 // Acquire arrival token for the next stage, non-blocking
