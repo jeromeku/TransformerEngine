@@ -42,9 +42,9 @@ Sw<3,4,3> o smem_ptr[16b](unset) o (((_64,_2),(_8,_2)),_1,_4,(_1,_13)):(((_1,_51
 sB
 Sw<1,4,3> o smem_ptr[16b](unset) o ((_16,_16),_1,_1,(_1,_13)):((_1,_16),_0,_0,(_0,_256))
 gA_mk
-gmem_ptr[16b](0x9caf7000000) o (_128,_64,1,6):(_1,128,_128,8192)
+gmem_ptr[16b](0x136c97000000) o (_128,_64,1,6):(_1,128,_128,8192)
 gB_nk
-gmem_ptr[16b](0x9caf7018000) o (_16,_16,1,1):(_1,16,_16,256)
+gmem_ptr[16b](0x136c97018000) o (_16,_16,1,1):(_1,16,_16,256)
 
  ------------------------------------------------------------- 
 mA
@@ -52,7 +52,7 @@ ArithTuple(_0,_0) o (128,384):(_1@0,_1@1)
 mB
 ArithTuple(_0,_0) o (16,16):(_1@0,_1@1)
 mC
-subptr[4b](0x9caf7018200.0) o (128,384):(64,_1)
+subptr[4b](0x136c97018200.0) o (128,384):(64,_1)
 sfc_layout
 (128,((_16,_4),6)):(24,((_0,_1),_4))
 
@@ -70,13 +70,13 @@ ArithTuple(_0,_0) o (_128,_64,1,6):(_1@0,_1@1,_128@0,_64@1)
 gB_nk
 ArithTuple(_0,_0) o (_16,_16,1,1):(_1@0,_1@1,_16@0,_16@1)
 gC_mn
-subptr[4b](0x9caf7018200.0) o (_128,_64,1,6):(64,_1,8192,_64)
+subptr[4b](0x136c97018200.0) o (_128,_64,1,6):(64,_1,8192,_64)
 gSFC_mn
-gmem_ptr[8b](0x9caf7024200) o (_128,(_16,_4),1,6):(24,(_0,_1),3072,_4)
+gmem_ptr[8b](0x136c97024200) o (_128,(_16,_4),1,6):(24,(_0,_1),3072,_4)
 tCsA
-Sw<3,4,3>_smem_ptr[16b](0x9cc00000580) o (((_64,_2),(_8,_2)),_1,_4,(_1,_13)):(((_1,_512),(_64,_1024)),_0,_2048,(_0,_8192))
+Sw<3,4,3>_smem_ptr[16b](0x136d00000580) o (((_64,_2),(_8,_2)),_1,_4,(_1,_13)):(((_1,_512),(_64,_1024)),_0,_2048,(_0,_8192))
 tCsB
-Sw<1,4,3>_smem_ptr[16b](0x9cc00034580) o ((_16,_16),_1,_1,(_1,_13)):((_1,_16),_0,_0,(_0,_256))
+Sw<1,4,3>_smem_ptr[16b](0x136d00034580) o ((_16,_16),_1,_1,(_1,_13)):((_1,_16),_0,_0,(_0,_256))
 
  ------------------------------------------------------------- 
 thr_mma
@@ -141,7 +141,7 @@ tmem_[32b](0x0000.0000) o ((_128,_64),_1,_1,_4):((_65536,_1),_0,_0,_64)
 tAgA
 ArithTuple(_0,_0) o (((_64,_8),(_2,_8)),1,6):(((_1@0,_1@1),(_64@0,_8@1)),_128@0,_64@1)
 tAsA
-Sw<3,4,3>_smem_ptr[16b](0x9cc00000580) o ((_512,_16),(_1,_13)):((_1,_512),(_0,_8192))
+Sw<3,4,3>_smem_ptr[16b](0x136d00000580) o ((_512,_16),(_1,_13)):((_1,_512),(_0,_8192))
 tBgB
 ArithTuple(_0,_0) o (((_16,_16),_1),1,1):(((_1@0,_1@1),_0),_16@0,_16@1)
 tBsB
@@ -156,50 +156,59 @@ Mma warp finished allocating TMEM!!!
 
  ------------------------------------------------------------- 
 Mma warp MainloopPipe CONSUMER stage, phase, count: 0 0 0 13
-tile_idx_m, tile_idx_n, k_tile: 0, 0, 0
+tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 0, 6
 tCrA_mk
 UMMA::DescriptorIterator o (_1,_1,_4):(_0,_0,_256)
 tCrB_nk
 UMMA::DescriptorIterator o (_1,_1):(_0,_0)
 size<2>(tCrA) / 4: 1
-Mma warp Accumulator pipe PRODUCER stage, phase, count, stages: 0, 1, 0, 4
+k_block 0 :: Mma warp Accumulator pipe PRODUCER stage, phase, count, stages: 0, 1, 0, 4
+Mma warp acquiring accumulator pipeline...
+Committing mma for k_block k_tile: 0, 0
 
  ------------------------------------------------------------- 
 Mma warp MainloopPipe CONSUMER stage, phase, count: 1 0 1 13
-tile_idx_m, tile_idx_n, k_tile: 0, 0, 1
+tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 1, 6
 tCrA_mk
 UMMA::DescriptorIterator o (_1,_1,_4):(_0,_0,_256)
 tCrB_nk
 UMMA::DescriptorIterator o (_1,_1):(_0,_0)
 size<2>(tCrA) / 4: 1
-Mma warp Accumulator pipe PRODUCER stage, phase, count, stages: 1, 1, 1, 4
+k_block 0 :: Mma warp Accumulator pipe PRODUCER stage, phase, count, stages: 1, 1, 1, 4
+Mma warp acquiring accumulator pipeline...
+Committing mma for k_block k_tile: 0, 1
 
  ------------------------------------------------------------- 
 Mma warp MainloopPipe CONSUMER stage, phase, count: 2 0 2 13
-tile_idx_m, tile_idx_n, k_tile: 0, 0, 2
+tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 2, 6
 tCrA_mk
 UMMA::DescriptorIterator o (_1,_1,_4):(_0,_0,_256)
 tCrB_nk
 UMMA::DescriptorIterator o (_1,_1):(_0,_0)
 size<2>(tCrA) / 4: 1
-Mma warp Accumulator pipe PRODUCER stage, phase, count, stages: 2, 1, 2, 4
+k_block 0 :: Mma warp Accumulator pipe PRODUCER stage, phase, count, stages: 2, 1, 2, 4
+Mma warp acquiring accumulator pipeline...
+Committing mma for k_block k_tile: 0, 2
 
  ------------------------------------------------------------- 
 Mma warp MainloopPipe CONSUMER stage, phase, count: 3 0 3 13
-tile_idx_m, tile_idx_n, k_tile: 0, 0, 3
+tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 3, 6
 tCrA_mk
 UMMA::DescriptorIterator o (_1,_1,_4):(_0,_0,_256)
 tCrB_nk
 UMMA::DescriptorIterator o (_1,_1):(_0,_0)
 size<2>(tCrA) / 4: 1
-Mma warp Accumulator pipe PRODUCER stage, phase, count, stages: 3, 1, 3, 4
+k_block 0 :: Mma warp Accumulator pipe PRODUCER stage, phase, count, stages: 3, 1, 3, 4
+Mma warp acquiring accumulator pipeline...
+Committing mma for k_block k_tile: 0, 3
 
  ------------------------------------------------------------- 
 Mma warp MainloopPipe CONSUMER stage, phase, count: 4 0 4 13
-tile_idx_m, tile_idx_n, k_tile: 0, 0, 4
+tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 4, 6
 tCrA_mk
 UMMA::DescriptorIterator o (_1,_1,_4):(_0,_0,_256)
 tCrB_nk
 UMMA::DescriptorIterator o (_1,_1):(_0,_0)
 size<2>(tCrA) / 4: 1
-Mma warp Accumulator pipe PRODUCER stage, phase, count, stages: 0, 0, 4, 4
+k_block 0 :: Mma warp Accumulator pipe PRODUCER stage, phase, count, stages: 0, 0, 4, 4
+Mma warp acquiring accumulator pipeline...
