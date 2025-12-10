@@ -42,9 +42,9 @@ Sw<3,4,3> o smem_ptr[16b](unset) o (((_64,_2),(_8,_2)),_1,_4,(_1,_13)):(((_1,_51
 sB
 Sw<1,4,3> o smem_ptr[16b](unset) o ((_16,_16),_1,_1,(_1,_13)):((_1,_16),_0,_0,(_0,_256))
 gA_mk
-gmem_ptr[16b](0xb58c7000000) o (_128,_64,1,6):(_1,128,_128,8192)
+gmem_ptr[16b](0xa0787000000) o (_128,_64,1,6):(_1,128,_128,8192)
 gB_nk
-gmem_ptr[16b](0xb58c7018000) o (_16,_16,1,1):(_1,16,_16,256)
+gmem_ptr[16b](0xa0787018000) o (_16,_16,1,1):(_1,16,_16,256)
 
  ------------------------------------------------------------- 
 mA
@@ -52,7 +52,7 @@ ArithTuple(_0,_0) o (128,384):(_1@0,_1@1)
 mB
 ArithTuple(_0,_0) o (16,16):(_1@0,_1@1)
 mC
-subptr[4b](0xb58c7018200.0) o (128,384):(64,_1)
+subptr[4b](0xa0787018200.0) o (128,384):(64,_1)
 sfc_layout
 (128,((_16,_4),6)):(24,((_0,_1),_4))
 
@@ -70,13 +70,13 @@ ArithTuple(_0,_0) o (_128,_64,1,6):(_1@0,_1@1,_128@0,_64@1)
 gB_nk
 ArithTuple(_0,_0) o (_16,_16,1,1):(_1@0,_1@1,_16@0,_16@1)
 gC_mn
-subptr[4b](0xb58c7018200.0) o (_128,_64,1,6):(64,_1,8192,_64)
+subptr[4b](0xa0787018200.0) o (_128,_64,1,6):(64,_1,8192,_64)
 gSFC_mn
-gmem_ptr[8b](0xb58c7024200) o (_128,(_16,_4),1,6):(24,(_0,_1),3072,_4)
+gmem_ptr[8b](0xa0787024200) o (_128,(_16,_4),1,6):(24,(_0,_1),3072,_4)
 tCsA
-Sw<3,4,3>_smem_ptr[16b](0xb5900000580) o (((_64,_2),(_8,_2)),_1,_4,(_1,_13)):(((_1,_512),(_64,_1024)),_0,_2048,(_0,_8192))
+Sw<3,4,3>_smem_ptr[16b](0xa0800000580) o (((_64,_2),(_8,_2)),_1,_4,(_1,_13)):(((_1,_512),(_64,_1024)),_0,_2048,(_0,_8192))
 tCsB
-Sw<1,4,3>_smem_ptr[16b](0xb5900034580) o ((_16,_16),_1,_1,(_1,_13)):((_1,_16),_0,_0,(_0,_256))
+Sw<1,4,3>_smem_ptr[16b](0xa0800034580) o ((_16,_16),_1,_1,(_1,_13)):((_1,_16),_0,_0,(_0,_256))
 
  ------------------------------------------------------------- 
 thr_mma
@@ -141,7 +141,7 @@ tmem_[32b](0x0000.0000) o ((_128,_64),_1,_1,_4):((_65536,_1),_0,_0,_64)
 tAgA
 ArithTuple(_0,_0) o (((_64,_8),(_2,_8)),1,6):(((_1@0,_1@1),(_64@0,_8@1)),_128@0,_64@1)
 tAsA
-Sw<3,4,3>_smem_ptr[16b](0xb5900000580) o ((_512,_16),(_1,_13)):((_1,_512),(_0,_8192))
+Sw<3,4,3>_smem_ptr[16b](0xa0800000580) o ((_512,_16),(_1,_13)):((_1,_512),(_0,_8192))
 tBgB
 ArithTuple(_0,_0) o (((_16,_16),_1),1,1):(((_1@0,_1@1),_0),_16@0,_16@1)
 tBsB
@@ -149,99 +149,54 @@ ArithTuple(_0,_0) o (((_16,_16),_1),1,1):(((_1@0,_1@1),_0),_16@0,_16@1)
 AtomThrShapeMNK
 (_1,_1,_1)
 Initialize TMA Load B...
+DMA WARP EXITING!!!
 
  ------------------------------------------------------------- 
-DMA WARP: Loading tAgA_mk(_,k_tile_idx_n)
-ArithTuple(0,0) o (((_64,_8),(_2,_8))):(((_1@0,_1@1),(_64@0,_8@1)))
-DMA WARP: Loading tAsA(_,write_stage)
-Sw<3,4,3>_smem_ptr[16b](0xb5900000580) o ((_512,_16)):((_1,_512))
-
- ------------------------------------------------------------- 
-blockIdx.x, tile_idx_m, tile_idx_n, tiles_in_m, tiles_in_n, K_TILE_MAX: 0, 0, 0, 1, 6, 6
-
- ------------------------------------------------------------- 
-tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 0, 6, 0, 0, 6
-Mainloop producer getting barrier for stage, phase, count: 0 1 0
-Mainloop producer acquiring arrival token for stage, phase, count: 1 1 1
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-Mma warp pipe consumer stage, phase, count: 0 0 0
-tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 0, 6, 1, 1, 6
+Mma warp pipe consumer stage, phase, count: 0 0 0 13
 tile_idx_m, tile_idx_n, k_tile: 0, 0, 0
-Mainloop producer getting barrier for stage, phase, count: 1 1 1
 tCrA_mk
-Mainloop producer acquiring arrival token for stage, phase, count: 2 1 2
-UMMA::DescriptorIterator
- ------------------------------------------------------------- 
- o 
- ------------------------------------------------------------- 
-(_tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 0, 6, 2, 2, 6
-1Mainloop producer getting barrier for stage, phase, count: 2 1 2
-,Mainloop producer acquiring arrival token for stage, phase, count: 3 1 3
-_
- ------------------------------------------------------------- 
-1,
- ------------------------------------------------------------- 
-_tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 0, 6, 3, 3, 6
-4Mainloop producer getting barrier for stage, phase, count: 3 1 3
-):Mainloop producer acquiring arrival token for stage, phase, count: 4 1 4
-(
- ------------------------------------------------------------- 
-_
- ------------------------------------------------------------- 
-0tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 0, 6, 4, 4, 6
-,_Mainloop producer getting barrier for stage, phase, count: 4 1 4
-0Mainloop producer acquiring arrival token for stage, phase, count: 5 1 5
-,
- ------------------------------------------------------------- 
-_
- ------------------------------------------------------------- 
-256)tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 0, 6, 5, 5, 6
-
-Mainloop producer getting barrier for stage, phase, count: 5 1 5
+UMMA::DescriptorIterator o (_1,_1,_4):(_0,_0,_256)
 tCrB_nk
-Mainloop producer acquiring arrival token for stage, phase, count: 6 1 6
-UMMA::DescriptorIterator
- ------------------------------------------------------------- 
- o (_1,_1):(_0,_0)
+UMMA::DescriptorIterator o (_1,_1):(_0,_0)
 size<2>(tCrA) / 4: 1
+Mma warp accumulator pipe stage, phase, count, stages: 0, 1, 0, 4
 
  ------------------------------------------------------------- 
-Mma warp pipe consumer stage, phase, count: 1 0 1
+Mma warp pipe consumer stage, phase, count: 1 0 1 13
 tile_idx_m, tile_idx_n, k_tile: 0, 0, 1
 tCrA_mk
 UMMA::DescriptorIterator o (_1,_1,_4):(_0,_0,_256)
 tCrB_nk
 UMMA::DescriptorIterator o (_1,_1):(_0,_0)
 size<2>(tCrA) / 4: 1
+Mma warp accumulator pipe stage, phase, count, stages: 1, 1, 1, 4
 
  ------------------------------------------------------------- 
-Mma warp pipe consumer stage, phase, count: 2 0 2
+Mma warp pipe consumer stage, phase, count: 2 0 2 13
 tile_idx_m, tile_idx_n, k_tile: 0, 0, 2
 tCrA_mk
 UMMA::DescriptorIterator o (_1,_1,_4):(_0,_0,_256)
 tCrB_nk
 UMMA::DescriptorIterator o (_1,_1):(_0,_0)
 size<2>(tCrA) / 4: 1
+Mma warp accumulator pipe stage, phase, count, stages: 2, 1, 2, 4
 
  ------------------------------------------------------------- 
-Mma warp pipe consumer stage, phase, count: 3 0 3
+Mma warp pipe consumer stage, phase, count: 3 0 3 13
 tile_idx_m, tile_idx_n, k_tile: 0, 0, 3
 tCrA_mk
 UMMA::DescriptorIterator o (_1,_1,_4):(_0,_0,_256)
 tCrB_nk
 UMMA::DescriptorIterator o (_1,_1):(_0,_0)
 size<2>(tCrA) / 4: 1
+Mma warp accumulator pipe stage, phase, count, stages: 3, 1, 3, 4
 
  ------------------------------------------------------------- 
-Mma warp pipe consumer stage, phase, count: 4 0 4
+Mma warp pipe consumer stage, phase, count: 4 0 4 13
 tile_idx_m, tile_idx_n, k_tile: 0, 0, 4
 tCrA_mk
 UMMA::DescriptorIterator o (_1,_1,_4):(_0,_0,_256)
 tCrB_nk
 UMMA::DescriptorIterator o (_1,_1):(_0,_0)
 size<2>(tCrA) / 4: 1
+Mma warp accumulator pipe stage, phase, count, stages: 0, 0, 4, 4

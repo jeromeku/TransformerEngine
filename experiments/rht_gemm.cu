@@ -80,6 +80,11 @@ struct SharedStorage {
         "\n ------------------------------------------------------------- " \
         "\n");
 
+#define PRINT_ONE_THREAD(print_statements) \
+    if (elect_one_sync()) {                \
+        print_statements                   \
+    }
+
 template <class MShape, class NShape, class KShape, class ClusterTileShape,
           class TA, class AStride, class ASmemLayout, class TmaLoadA, class TB,
           class BStride, class BSmemLayout, class TmaLoadB, class TC_,
@@ -358,8 +363,8 @@ __global__ static void rht_gemm_device(
                  tBgB(_, 0, 0), tBsB(_, 0));
         }
         cute::wait_barrier(shared_storage.tma_barrier[0], 0 /*tma_phase_bit*/);
-        
-        #if defined(PRINT_DMA)
+
+#if defined(PRINT_DMA)
         if (elect_one_sync()) {
             auto tAgA_mk = tAgA(_, 0, _);
             PRINT_DELIMITER
@@ -367,7 +372,7 @@ __global__ static void rht_gemm_device(
                        tAgA_mk(_, 0));
             print_cute("DMA WARP: Loading tAsA(_,write_stage)", tAsA(_, 0));
         }
-        #endif
+#endif
 
         do {
             bool is_first_wave = linear_tile_idx == blockIdx.x;
@@ -377,7 +382,7 @@ __global__ static void rht_gemm_device(
             auto barrier_token = mainloop_pipeline.producer_try_acquire(
                 mainloop_pipe_producer_state, skip_wait);
 
-            #if defined(PRINT_DMA)
+#if defined(PRINT_DMA)
             if (elect_one_sync()) {
                 PRINT_DELIMITER
                 printf(
@@ -387,12 +392,12 @@ __global__ static void rht_gemm_device(
                     blockIdx.x, tile_idx_m, tile_idx_n, tiles_in_m, tiles_in_n,
                     K_TILE_MAX);
             }
-            #endif
+#endif
 
             CUTE_NO_UNROLL
             while (k_tile < K_TILE_MAX && k_tile + tile_idx_n < tiles_in_n) {
                 int k_tile_idx_n = tile_idx_n + k_tile;
-                #if defined(PRINT_DMA)
+#if defined(PRINT_DMA)
                 if (elect_one_sync()) {
                     PRINT_DELIMITER
                     printf(
@@ -402,7 +407,7 @@ __global__ static void rht_gemm_device(
                         tile_idx_m, tile_idx_n, tiles_in_n, k_tile,
                         k_tile_idx_n, K_TILE_MAX);
                 }
-                #endif
+#endif
 
                 ++k_tile;
                 skip_wait =
@@ -416,8 +421,8 @@ __global__ static void rht_gemm_device(
                 using BarrierType =
                     typename MainloopPipeline::ProducerBarrierType;
 
-                #if defined(PRINT_DMA)
-                    if (elect_one_sync()) {
+#if defined(PRINT_DMA)
+                if (elect_one_sync()) {
                     printf(
                         "Mainloop producer getting barrier for stage, phase, "
                         "count: %d %d %d\n",
@@ -425,7 +430,7 @@ __global__ static void rht_gemm_device(
                         mainloop_pipe_producer_state.phase(),
                         mainloop_pipe_producer_state.count());
                 }
-                #endif
+#endif
 
                 BarrierType* tma_barrier =
                     mainloop_pipeline.producer_get_barrier(
@@ -435,7 +440,7 @@ __global__ static void rht_gemm_device(
 
                 // Advance write stage
                 ++mainloop_pipe_producer_state;
-                #if defined(PRINT_DMA)
+#if defined(PRINT_DMA)
                 if (elect_one_sync()) {
                     printf(
                         "Mainloop producer acquiring arrival token for stage, "
@@ -445,7 +450,7 @@ __global__ static void rht_gemm_device(
                         mainloop_pipe_producer_state.count());
                     PRINT_DELIMITER
                 }
-                #endif
+#endif
 
                 // Acquire arrival token for the next stage, non-blocking
                 barrier_token = mainloop_pipeline.producer_try_acquire(
@@ -483,6 +488,8 @@ __global__ static void rht_gemm_device(
         tmem_allocation_result_barrier.arrive();
         uint32_t tmem_base_ptr = shared_storage.tmem_base_ptr;
         bulk_tmem_mma.data() = tmem_base_ptr;
+        
+        PRINT_ONE_THREAD(PRINT_DELIMITER; printf("Mma warp finished allocating TMEM!!!\n");)
 
         do {
             uint32_t skip_wait = K_TILE_MAX <= 0;
@@ -518,7 +525,6 @@ __global__ static void rht_gemm_device(
 
                 CUTE_UNROLL
                 for (int k_block = 0; k_block < size<2>(tCrA) / 4; ++k_block) {
-                    
                     if (elect_one_sync()) {
                         printf(
                             "Mma warp accumulator pipe stage, "
