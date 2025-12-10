@@ -97,7 +97,6 @@ __global__ static void rht_gemm_device(
     BSmemLayout sBlayout, CUTE_GRID_CONSTANT TmaLoadB const tma_load_b, TC_* C,
     CStride dC, CSmemLayout, TSFC_* SFC, TiledMMA mma, float const* global_amax,
     const size_t* rng_state) {
-    
     using X = Underscore;
     using TC = cute::float_e2m1_t;
     using TSFC = cute::float_e4m3_t;
@@ -499,12 +498,24 @@ __global__ static void rht_gemm_device(
             CUTE_NO_UNROLL
             for (int k_tile = 0;
                  k_tile < K_TILE_MAX && k_tile + tile_idx_n < tiles_in_n;) {
+                #if defined(DEBUG_MMA)
+                if (elect_one_sync()) {
+                    PRINT_DELIMITER
+                    printf("MMA_WARP:Awaiting mainloop pipeline\n");
+                    printf(
+                        "MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX"
+                        ": %d, %d, %d, %d\n",
+                        tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX);
+                }
+                #endif
+
                 mainloop_pipeline.consumer_wait(mainloop_pipe_consumer_state,
                                                 barrier_token);
                 int read_stage = mainloop_pipe_consumer_state.index();
                 auto tCrA_mk = tCrA(_, _, _, read_stage);
                 auto tCrB_nk = tCrB(_, _, 0, 0);
 
+#if defined(DEBUG_MMA)
                 if (elect_one_sync()) {
                     PRINT_DELIMITER
                     printf(
@@ -529,9 +540,10 @@ __global__ static void rht_gemm_device(
                            decltype(size<0>(tCrB_nk))::value);
                     printf("size<2>(tCrA) / 4: %d\n", size<2>(tCrA) / 4);
                 }
-
+#endif
                 CUTE_UNROLL
                 for (int k_block = 0; k_block < size<2>(tCrA) / 4; ++k_block) {
+#if defined(DEBUG_MMA)
                     if (elect_one_sync()) {
                         printf(
                             "k_block %d :: Mma warp Accumulator pipe PRODUCER "
@@ -542,9 +554,10 @@ __global__ static void rht_gemm_device(
                             accumulator_pipe_producer_state.count(),
                             AccumulatorPipelineState::Stages);
                     }
+#endif
                     PRINT_ONE_THREAD(
                         printf(
-                            "Mma warp acquiring accumulator pipeline...\n"););
+                            "Mma warp acquiring accumulator pipeline stage: %d\n", accumulator_pipe_producer_state.index()););
                     accumulator_pipeline.producer_acquire(
                         accumulator_pipe_producer_state);
                     CUTE_UNROLL
@@ -558,8 +571,9 @@ __global__ static void rht_gemm_device(
                     // Issues a umma_arrive (commit)
                     // tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64
                     PRINT_ONE_THREAD(
-                        printf("Committing mma for k_block k_tile: %d, %d\n",
-                               k_block, k_tile);)
+                        printf("Committing mma for k_block k_tile, stage: %d, %d, %d\n",
+                               k_block, k_tile, accumulator_pipe_producer_state.index());
+                        PRINT_DELIMITER)
 
                     accumulator_pipeline.producer_commit(
                         accumulator_pipe_producer_state);
@@ -581,6 +595,9 @@ __global__ static void rht_gemm_device(
             tile_idx_m = linear_tile_idx % tiles_in_m;
             tile_idx_n = (linear_tile_idx / tiles_in_m) * K_TILE_MAX;
         } while (tile_idx_m < tiles_in_m && tile_idx_n < tiles_in_n);
+        if (elect_one_sync()) {
+            printf("MMA_WARP::releasing TMEM\n");
+        }
         tmem_allocator.release_allocation_lock();
         accumulator_pipeline.producer_tail(accumulator_pipe_producer_state);
         tmem_allocator.free(tmem_base_ptr,
@@ -590,37 +607,37 @@ __global__ static void rht_gemm_device(
         static constexpr int FragmentSize = 256 / sizeof_bits_v<TC>;
 
         // this is a barrier.sync
-        PRINT_ONE_THREAD(printf("EPILOGUE_WARP::Arrived and waiting on TMEM\n"););
+        PRINT_ONE_THREAD(PRINT_DELIMITER; printf(
+                             "EPILOGUE_WARP::Arrived and waiting on TMEM\n"););
 
         tmem_allocation_result_barrier.arrive_and_wait();
         uint32_t tmem_base_ptr = shared_storage.tmem_base_ptr;
         bulk_tmem_epilogue.data() = tmem_base_ptr;
         int thread_idx = threadIdx.x % 128;
 
-        Tensor tCgC =
-            thr_mma_epilogue
-                .partition_C(gC_mn);  // (MMA,MMA_M,MMA_N) // (MMA,MMA_M,MMA_N)
+        Tensor tCgC = thr_mma_epilogue.partition_C(
+            gC_mn);  // (MMA,MMA_M,MMA_N) // (MMA,MMA_M,MMA_N)
         auto tiled_t2r =
             make_tmem_copy(TMEM_LOAD_NEW{}, bulk_tmem_epilogue(_, _, _, _0{}));
         auto tiled_r2g = make_tiled_copy_D(
             Copy_Atom<SM100_STORE_256bit_CACHE_NOALLOCATION, TC>{}, tiled_t2r);
         auto thr_t2r = tiled_t2r.get_slice(thread_idx);
         auto thr_r2g = tiled_r2g.get_slice(thread_idx);
-    #if defined(DEBUG_EPILOGUE)
-        if(elect_one_sync()){
-            PRINT_DELIMITER; 
+#if defined(DEBUG_EPILOGUE)
+        if (elect_one_sync()) {
+            PRINT_DELIMITER;
             print_cute("EPILOGUE_WARP::tCgC", tCgC);
             print_cute("EPILOGUE_WARP::tiled_t2r", tiled_t2r);
             print_cute("EPILOGUE_WARP::tiled_r2g", tiled_r2g);
             print_cute("EPILOGUE_WARP::thr_t2r", thr_t2r);
             print_cute("EPILOGUE_WARP::tiled_r2g", thr_r2g);
         }
-    #endif            
+#endif
         // NVFP4 non-E8 recipe constants and global scales
         static constexpr float fp4_max = 6.0f;
 
         const float global_encode_scale = 1.0f;
-//            ComputeGlobalEncodeScaleFP4(global_amax_val);
+        //            ComputeGlobalEncodeScaleFP4(global_amax_val);
         const float global_decode_scale = 1.0f / global_encode_scale;
         auto sfd_converter = cutlass::NumericConverter<TSFC, float>{};
 
@@ -632,17 +649,21 @@ __global__ static void rht_gemm_device(
 
                 Tensor tCgSFC_mn =
                     gSFC_mn(_, _, tile_idx_m, tile_idx_n + k_tile);
-                if(elect_one_sync()){
+
+                if (elect_one_sync()) {
                     PRINT_DELIMITER;
-                    printf("EPILOGUE_WARPS:Awaiting on accumulator pipe\n");
+                    printf("EPILOGUE_WARPS:Awaiting on accumulator pipe: %d\n", accumulator_pipe_consumer_state.index());
                     printf(
-                        "EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX"
+                        "EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, "
+                        "K_TILE_MAX"
                         ": %d, %d, %d, %d\n",
                         tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX);
+                    #if defined(DEBUG_EPILOGUE)
                     print_cute("tCgC", tCgC);
                     print_cute("tCgC_mn", tCgC_mn);
                     print_cute("gSFC_mn", gSFC_mn);
                     print_cute("tCgSFC_mn", tCgSFC_mn);
+                    #endif
                 }
 
                 accumulator_pipeline.consumer_wait(
@@ -689,12 +710,17 @@ __global__ static void rht_gemm_device(
                 copy(tiled_t2r, tDtC, tTR_rAcc);
                 cutlass::arch::fence_view_async_tmem_load();
 
+                PRINT_ONE_THREAD(
+                    printf(
+                        "EPILOGUE_WARPS Releasing accumulator pipeline: %d\n",
+                        accumulator_pipe_consumer_state.index());
+                    PRINT_DELIMITER)
                 accumulator_pipeline.consumer_release(
                     accumulator_pipe_consumer_state);
 
                 ++accumulator_pipe_consumer_state;
 
-            #if 0
+#if 0
                 // Cast data from FP32 to BF16 to FP32.
                 auto convert_accum_to_bf16 = cutlass::NumericArrayConverter<
                     cutlass::bfloat16_t, ElementAccumulator, FragmentSize>{};
@@ -773,7 +799,7 @@ __global__ static void rht_gemm_device(
 
                 copy(AutoVectorizingCopyWithAssumedAlignment<128>{}, tDrSFC,
                      tDgSFC);
-            #endif
+#endif
             }
             linear_tile_idx += gridDim.x;
             tile_idx_m = linear_tile_idx % tiles_in_m;
@@ -946,7 +972,8 @@ int main() {
     thrust::device_vector<TB> deviceB = hB;
     // these are technically not correct but for debugging purposes, fine
     thrust::host_vector<uint8_t> hC(M * N);  // should be float4_e2m1
-    thrust::host_vector<uint8_t> sFC(M * N); // should be M x N // 16 and float8_e4m3 
+    thrust::host_vector<uint8_t> sFC(
+        M * N);  // should be M x N // 16 and float8_e4m3
     thrust::device_vector<uint8_t> deviceC = hC;
     thrust::device_vector<uint8_t> deviceSFC = sFC;
 
@@ -1022,12 +1049,13 @@ int main() {
     float global_amax = 1.0f;
     size_t rng = 1.0f;
 
-    float  *d_global_amax;
-    size_t *d_rng;
+    float* d_global_amax;
+    size_t* d_rng;
     cudaMalloc(&d_global_amax, sizeof(float));
-    cudaMalloc(&d_rng,         sizeof(size_t));
-    cudaMemcpy(d_global_amax, &global_amax, sizeof(float),  cudaMemcpyHostToDevice);
-    cudaMemcpy(d_rng,         &rng,         sizeof(size_t), cudaMemcpyHostToDevice);
+    cudaMalloc(&d_rng, sizeof(size_t));
+    cudaMemcpy(d_global_amax, &global_amax, sizeof(float),
+               cudaMemcpyHostToDevice);
+    cudaMemcpy(d_rng, &rng, sizeof(size_t), cudaMemcpyHostToDevice);
 
     (*kernel_ptr)<<<dimGrid, dimBlock, smem_size>>>(
         M, N, k_tile_size, cga_tile_shape,
