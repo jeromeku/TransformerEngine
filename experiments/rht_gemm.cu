@@ -358,7 +358,8 @@ __global__ static void rht_gemm_device(
                  tBgB(_, 0, 0), tBsB(_, 0));
         }
         cute::wait_barrier(shared_storage.tma_barrier[0], 0 /*tma_phase_bit*/);
-
+        
+        #if defined(PRINT_DMA)
         if (elect_one_sync()) {
             auto tAgA_mk = tAgA(_, 0, _);
             PRINT_DELIMITER
@@ -366,6 +367,7 @@ __global__ static void rht_gemm_device(
                        tAgA_mk(_, 0));
             print_cute("DMA WARP: Loading tAsA(_,write_stage)", tAsA(_, 0));
         }
+        #endif
 
         do {
             bool is_first_wave = linear_tile_idx == blockIdx.x;
@@ -375,6 +377,7 @@ __global__ static void rht_gemm_device(
             auto barrier_token = mainloop_pipeline.producer_try_acquire(
                 mainloop_pipe_producer_state, skip_wait);
 
+            #if defined(PRINT_DMA)
             if (elect_one_sync()) {
                 PRINT_DELIMITER
                 printf(
@@ -384,10 +387,12 @@ __global__ static void rht_gemm_device(
                     blockIdx.x, tile_idx_m, tile_idx_n, tiles_in_m, tiles_in_n,
                     K_TILE_MAX);
             }
+            #endif
 
             CUTE_NO_UNROLL
             while (k_tile < K_TILE_MAX && k_tile + tile_idx_n < tiles_in_n) {
                 int k_tile_idx_n = tile_idx_n + k_tile;
+                #if defined(PRINT_DMA)
                 if (elect_one_sync()) {
                     PRINT_DELIMITER
                     printf(
@@ -397,6 +402,7 @@ __global__ static void rht_gemm_device(
                         tile_idx_m, tile_idx_n, tiles_in_n, k_tile,
                         k_tile_idx_n, K_TILE_MAX);
                 }
+                #endif
 
                 ++k_tile;
                 skip_wait =
@@ -410,7 +416,8 @@ __global__ static void rht_gemm_device(
                 using BarrierType =
                     typename MainloopPipeline::ProducerBarrierType;
 
-                if (elect_one_sync()) {
+                #if defined(PRINT_DMA)
+                    if (elect_one_sync()) {
                     printf(
                         "Mainloop producer getting barrier for stage, phase, "
                         "count: %d %d %d\n",
@@ -418,6 +425,7 @@ __global__ static void rht_gemm_device(
                         mainloop_pipe_producer_state.phase(),
                         mainloop_pipe_producer_state.count());
                 }
+                #endif
 
                 BarrierType* tma_barrier =
                     mainloop_pipeline.producer_get_barrier(
@@ -427,7 +435,7 @@ __global__ static void rht_gemm_device(
 
                 // Advance write stage
                 ++mainloop_pipe_producer_state;
-
+                #if defined(PRINT_DMA)
                 if (elect_one_sync()) {
                     printf(
                         "Mainloop producer acquiring arrival token for stage, "
@@ -437,8 +445,9 @@ __global__ static void rht_gemm_device(
                         mainloop_pipe_producer_state.count());
                     PRINT_DELIMITER
                 }
+                #endif
 
-                Acquire arrival token for the next stage, non-blocking
+                // Acquire arrival token for the next stage, non-blocking
                 barrier_token = mainloop_pipeline.producer_try_acquire(
                     mainloop_pipe_producer_state, skip_wait);
 
@@ -452,6 +461,10 @@ __global__ static void rht_gemm_device(
             tile_idx_n = (linear_tile_idx / tiles_in_m) * K_TILE_MAX;
 
         } while (tile_idx_m < tiles_in_m && tile_idx_n < tiles_in_n);
+
+        if (elect_one_sync()) {
+            printf("DMA WARP EXITING!!!\n");
+        }
         mainloop_pipeline.producer_tail(mainloop_pipe_producer_state);
     } else if (is_mma_warp) {
         mma.accumulate_ = UMMA::ScaleOut::Zero;
@@ -489,10 +502,11 @@ __global__ static void rht_gemm_device(
                     PRINT_DELIMITER
                     printf(
                         "Mma warp pipe consumer stage, "
-                        "phase, count: %d %d %d\n",
+                        "phase, count: %d %d %d %d\n",
                         mainloop_pipe_consumer_state.index(),
                         mainloop_pipe_consumer_state.phase(),
-                        mainloop_pipe_consumer_state.count());
+                        mainloop_pipe_consumer_state.count(),
+                        MainloopPipelineState::Stages);
                     printf(
                         "tile_idx_m, tile_idx_n, k_tile"
                         ": %d, %d, %d\n",
@@ -504,6 +518,16 @@ __global__ static void rht_gemm_device(
 
                 CUTE_UNROLL
                 for (int k_block = 0; k_block < size<2>(tCrA) / 4; ++k_block) {
+                    
+                    if (elect_one_sync()) {
+                        printf(
+                            "Mma warp accumulator pipe stage, "
+                            "phase, count, stages: %d, %d, %d, %d\n",
+                            accumulator_pipe_producer_state.index(),
+                            accumulator_pipe_producer_state.phase(),
+                            accumulator_pipe_producer_state.count(),
+                            AccumulatorPipelineState::Stages);
+                    }
                     accumulator_pipeline.producer_acquire(
                         accumulator_pipe_producer_state);
                     CUTE_UNROLL
