@@ -378,8 +378,8 @@ __global__ static void rht_gemm_device(
             if (elect_one_sync()) {
                 PRINT_DELIMITER
                 printf(
-                    "tile_idx_m, tile_idx_n, tiles_in_m, tiles_in_n, K_TILE_MAX: %d, %d, "
-                    "%d, %d, %d\n", tile_idx_m, tile_idx_n, tiles_in_m, tiles_in_n, K_TILE_MAX);
+                    "blockIdx.x, tile_idx_m, tile_idx_n, tiles_in_m, tiles_in_n, K_TILE_MAX: %d, %d, %d, "
+                    "%d, %d, %d\n", blockIdx.x, tile_idx_m, tile_idx_n, tiles_in_m, tiles_in_n, K_TILE_MAX);
             }
 
             CUTE_NO_UNROLL
@@ -459,13 +459,15 @@ int main() {
     using TC = cutlass::float_e2m1_t;
     using TSFC = cutlass::float_ue4m3_t;
 
-    int k_tile_size = 2048;
+    int k_tile_size = 64; //2048;
 
     constexpr int m = 128;   // 768;   // N
-    constexpr int n = 1024;  // 1024;  // M
+    constexpr int n = 64;  // 1024;  // M
+    constexpr int num_m_tiles = 2;
+    constexpr int num_n_tiles = 4;
     // Define shapes (dynamic)
-    auto M = static_cast<int>(m);
-    auto N = static_cast<int>(n);
+    auto M = static_cast<int>(m * num_m_tiles);
+    auto N = static_cast<int>(n * num_n_tiles);
 
     // Define strides (mixed)
     auto dA = make_stride(Int<1>{}, m);   // (dM,dK)
