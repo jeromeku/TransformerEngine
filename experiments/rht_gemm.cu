@@ -944,8 +944,9 @@ int main() {
     thrust::host_vector<TB> hB(16 * 16);
     thrust::device_vector<TA> deviceA = hA;
     thrust::device_vector<TB> deviceB = hB;
-    thrust::host_vector<uint8_t> hC(M * N);
-    thrust::host_vector<uint8_t> sFC(M * N);
+    // these are technically not correct but for debugging purposes, fine
+    thrust::host_vector<uint8_t> hC(M * N);  // should be float4_e2m1
+    thrust::host_vector<uint8_t> sFC(M * N); // should be M x N // 16 and float8_e4m3 
     thrust::device_vector<uint8_t> deviceC = hC;
     thrust::device_vector<uint8_t> deviceSFC = sFC;
 

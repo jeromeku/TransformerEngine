@@ -42,9 +42,9 @@ Sw<3,4,3> o smem_ptr[16b](unset) o (((_64,_2),(_8,_2)),_1,_4,(_1,_13)):(((_1,_51
 sB
 Sw<1,4,3> o smem_ptr[16b](unset) o ((_16,_16),_1,_1,(_1,_13)):((_1,_16),_0,_0,(_0,_256))
 gA_mk
-gmem_ptr[16b](0xff2a7000000) o (_128,_64,1,6):(_1,128,_128,8192)
+gmem_ptr[16b](0x1472b5000000) o (_128,_64,1,6):(_1,128,_128,8192)
 gB_nk
-gmem_ptr[16b](0xff2a7018000) o (_16,_16,1,1):(_1,16,_16,256)
+gmem_ptr[16b](0x1472b5018000) o (_16,_16,1,1):(_1,16,_16,256)
 
  ------------------------------------------------------------- 
 mA
@@ -52,7 +52,7 @@ ArithTuple(_0,_0) o (128,384):(_1@0,_1@1)
 mB
 ArithTuple(_0,_0) o (16,16):(_1@0,_1@1)
 mC
-subptr[4b](0xff2a7018200.0) o (128,384):(64,_1)
+subptr[4b](0x1472b5018200.0) o (128,384):(64,_1)
 sfc_layout
 (128,((_16,_4),6)):(24,((_0,_1),_4))
 
@@ -70,13 +70,13 @@ ArithTuple(_0,_0) o (_128,_64,1,6):(_1@0,_1@1,_128@0,_64@1)
 gB_nk
 ArithTuple(_0,_0) o (_16,_16,1,1):(_1@0,_1@1,_16@0,_16@1)
 gC_mn
-subptr[4b](0xff2a7018200.0) o (_128,_64,1,6):(64,_1,8192,_64)
+subptr[4b](0x1472b5018200.0) o (_128,_64,1,6):(64,_1,8192,_64)
 gSFC_mn
-gmem_ptr[8b](0xff2a7024200) o (_128,(_16,_4),1,6):(24,(_0,_1),3072,_4)
+gmem_ptr[8b](0x1472b5024200) o (_128,(_16,_4),1,6):(24,(_0,_1),3072,_4)
 tCsA
-Sw<3,4,3>_smem_ptr[16b](0xff300000580) o (((_64,_2),(_8,_2)),_1,_4,(_1,_13)):(((_1,_512),(_64,_1024)),_0,_2048,(_0,_8192))
+Sw<3,4,3>_smem_ptr[16b](0x147300000580) o (((_64,_2),(_8,_2)),_1,_4,(_1,_13)):(((_1,_512),(_64,_1024)),_0,_2048,(_0,_8192))
 tCsB
-Sw<1,4,3>_smem_ptr[16b](0xff300034580) o ((_16,_16),_1,_1,(_1,_13)):((_1,_16),_0,_0,(_0,_256))
+Sw<1,4,3>_smem_ptr[16b](0x147300034580) o ((_16,_16),_1,_1,(_1,_13)):((_1,_16),_0,_0,(_0,_256))
 
  ------------------------------------------------------------- 
 thr_mma
@@ -141,7 +141,7 @@ tmem_[32b](0x0000.0000) o ((_128,_64),_1,_1,_4):((_65536,_1),_0,_0,_64)
 tAgA
 ArithTuple(_0,_0) o (((_64,_8),(_2,_8)),1,6):(((_1@0,_1@1),(_64@0,_8@1)),_128@0,_64@1)
 tAsA
-Sw<3,4,3>_smem_ptr[16b](0xff300000580) o ((_512,_16),(_1,_13)):((_1,_512),(_0,_8192))
+Sw<3,4,3>_smem_ptr[16b](0x147300000580) o ((_512,_16),(_1,_13)):((_1,_512),(_0,_8192))
 tBgB
 ArithTuple(_0,_0) o (((_16,_16),_1),1,1):(((_1@0,_1@1),_0),_16@0,_16@1)
 tBsB
@@ -149,182 +149,419 @@ ArithTuple(_0,_0) o (((_16,_16),_1),1,1):(((_1@0,_1@1),_0),_16@0,_16@1)
 AtomThrShapeMNK
 (_1,_1,_1)
 Initialize TMA Load B...
+EPILOGUE_WARP::Arrived and waiting on TMEM
+EPILOGUE_WARP::Arrived and waiting on TMEM
+EPILOGUE_WARP::Arrived and waiting on TMEM
+EPILOGUE_WARP::Arrived and waiting on TMEM
 
  ------------------------------------------------------------- 
 DMA WARP EXITING!!!
 Mma warp finished allocating TMEM!!!
 
  ------------------------------------------------------------- 
-Mma warp MainloopPipe CONSUMER stage, phase, count: 0 0 0 13
-tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 0, 6
-tCrA_mk
-UMMA::DescriptorIterator o (_1,_1,_4):(_0,_0,_256)
-tCrB_nk
-UMMA::DescriptorIterator o (_1,_1):(_0,_0)
-tCrA_mk(_, _, k_block * 4 + i) layout
-(_1,_1):(_0,_0)
-decltype(size<0>(A))::value: 1
-decltype(size<0>(A))::value: 1
-size<2>(tCrA) / 4: 1
-k_block 0 :: Mma warp Accumulator pipe PRODUCER stage, phase, count, stages: 0, 1, 0, 4
-Mma warp acquiring accumulator pipeline...
-GEMM_DISPATCH V x M, V x N: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:297
-A Layout:
-(_1,_1):(_0,_0)C Layout:
-((_128,_16),_1,_1):((_65536,_1),_0,_0)A size: 8
-B size: 8
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:201
-GEMM_DISPATCH V x M, V x N: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:297
-A Layout:
-(_1,_1):(_0,_0)C Layout:
-((_128,_16),_1,_1):((_65536,_1),_0,_0)A size: 8
-B size: 8
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:201
-GEMM_DISPATCH V x M, V x N: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:297
-A Layout:
-(_1,_1):(_0,_0)C Layout:
-((_128,_16),_1,_1):((_65536,_1),_0,_0)A size: 8
-B size: 8
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:201
-GEMM_DISPATCH V x M, V x N: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:297
-A Layout:
-(_1,_1):(_0,_0)C Layout:
-((_128,_16),_1,_1):((_65536,_1),_0,_0)A size: 8
-B size: 8
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:201
-Committing mma for k_block k_tile: 0, 0
 
  ------------------------------------------------------------- 
-Mma warp MainloopPipe CONSUMER stage, phase, count: 1 0 1 13
-tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 1, 6
-tCrA_mk
-UMMA::DescriptorIterator o (_1,_1,_4):(_0,_0,_256)
-tCrB_nk
-UMMA::DescriptorIterator o (_1,_1):(_0,_0)
+
+ ------------------------------------------------------------- 
+
+ ------------------------------------------------------------- 
+
+ ------------------------------------------------------------- 
+EPILOGUE_WARPS:Awaiting on accumulator pipe
+EPILOGUE_WARPS:Awaiting on accumulator pipe
+EPILOGUE_WARPS:Awaiting on accumulator pipe
+EPILOGUE_WARPS:Awaiting on accumulator pipe
+Mma warp MainloopPipe CONSUMER stage, phase, count: 0 0 0 13
+EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 0, 6
+EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 0, 6
+EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 0, 6
+EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 0, 6
+tCgC
+MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 0, 6
+tCgC
+tCgC
+tCgC
+subptr[4b](0x1472b5018200.0)tCrA_mk
+subptr[4b](0x1472b5018200.0)subptr[4b](0x1472b5018200.0)subptr[4b](0x1472b5018200.0) o UMMA::DescriptorIterator o  o  o (( o (((((((_____1281128128128,,,,_,___64_16464),64)),_),,_4_,_1)1_1,:,1,_(_,__11_10,,1,1,1,1,_,6,016),6,):_):6256(:())(((:
+64(64(tCrB_nk
+,64,(UMMA::DescriptorIterator_,_64 o 1_1,()1)__,),11_,_,)0_0_,,0,1___,)00_0:,,0,(81928192_,_,,819200__,,,6464__)8192)064
+,
+))tCgC_mn
+_tCgC_mn
+
+
+subptr[4b](0x1472b5018200.0)64subptr[4b](0x1472b5018200.0)tCrA_mk(_, _, k_block * 4 + i) layout
+tCgC_mn
+ o  o )((subptr[4b](0x1472b5018200.0)(
+_( o (tCgC_mn
+1_(_subptr[4b](0x1472b5018200.0),128(128_ o ,_,1_(128_)64(,64:)__)(,12864,__,)_01,1_,,_,64__1_)10,1,))_)
+_:1:decltype(size<0>(A))::value: 1
+1()(decltype(size<0>(A))::value: 1
+(,:(size<2>(tCrA) / 4: 1
+64_(64,k_block 0 :: Mma warp Accumulator pipe PRODUCER stage, phase, count, stages: 0, 1, 0, 4
+1(,_Mma warp acquiring accumulator pipeline...
+_64)11,GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+:))_,(GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+,1_(_)064GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+0,,,,__GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+__0001Committing mma for k_block k_tile: 0, 0
+,)))
+ ------------------------------------------------------------- 
+
+_
+,Mma warp MainloopPipe CONSUMER stage, phase, count: 1 0 1 13
+gSFC_mn
+0gSFC_mn
+_MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 1, 6
+gmem_)gmem_0tCrA_mk
+ptr[
+ptr[,UMMA::DescriptorIterator8gSFC_mn
+_8 o b](0x1472b5024200)b](0x1472b5024200)gmem_0( o  o ptr[)_(8
+(1_b](0x1472b5024200)gSFC_mn
+_,128 o 128gmem__,(,1ptr[(_(,8__128_b](0x1472b5024200)164,16, o )(,_(:__4_(164)_128,),0,_,1,(41,__),6016,6),,)1:__256:,(4)(624)
+24,),tCrB_nk
+,(:(1UMMA::DescriptorIterator_(_,0 o 240,(6,,__)(_11:_1),0(),_,24,30721_3072,),1,(:_)__(4,4_0)3072)0
+,,
+,tCgSFC_mn
+__tCgSFC_mn
+_gmem_140gmem_ptr[)))ptr[8,
+
+8b](0x1472b5024200)3072tCgSFC_mn
 tCrA_mk(_, _, k_block * 4 + i) layout
-(_1,_1):(_0,_0)
-decltype(size<0>(A))::value: 1
-decltype(size<0>(A))::value: 1
-size<2>(tCrA) / 4: 1
-k_block 0 :: Mma warp Accumulator pipe PRODUCER stage, phase, count, stages: 1, 1, 1, 4
-Mma warp acquiring accumulator pipeline...
-GEMM_DISPATCH V x M, V x N: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:297
-A Layout:
-(_1,_1):(_0,_0)C Layout:
-((_128,_16),_1,_1):((_65536,_1),_0,_0)A size: 8
-B size: 8
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:201
-GEMM_DISPATCH V x M, V x N: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:297
-A Layout:
-(_1,_1):(_0,_0)C Layout:
-((_128,_16),_1,_1):((_65536,_1),_0,_0)A size: 8
-B size: 8
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:201
-GEMM_DISPATCH V x M, V x N: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:297
-A Layout:
-(_1,_1):(_0,_0)C Layout:
-((_128,_16),_1,_1):((_65536,_1),_0,_0)A size: 8
-B size: 8
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:201
-GEMM_DISPATCH V x M, V x N: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:297
-A Layout:
-(_1,_1):(_0,_0)C Layout:
-((_128,_16),_1,_1):((_65536,_1),_0,_0)A size: 8
-B size: 8
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:201
+b](0x1472b5024200) o ,gmem_( o (_ptr[_(_481_128)b](0x1472b5024200),128,
+ o _,(tCgSFC_mn
+(1(_)_gmem__16:128ptr[16,(,,8__(_4b](0x1472b5024200)0_4), o 16))_(,:0)__():128424
+(,),decltype(size<0>(A))::value: 1
+24)((decltype(size<0>(A))::value: 1
+,:__(size<2>(tCrA) / 4: 1
+(160_k_block 0 :: Mma warp Accumulator pipe PRODUCER stage, phase, count, stages: 1, 1, 1, 4
+24,,0,Mma warp acquiring accumulator pipeline...
+__,(14GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+__)1)GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+0))),
+):GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+_
+ ------------------------------------------------------------- 
+
+(1GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+EPILOGUE_WARPS:Awaiting on accumulator pipe
+
+ ------------------------------------------------------------- 
+24),EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 1, 6
+EPILOGUE_WARPS:Awaiting on accumulator pipe
 Committing mma for k_block k_tile: 0, 1
+)(tCgC
+EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 1, 6
+
+
+ ------------------------------------------------------------- 
+_subptr[4b](0x1472b5018200.0)tCgC
 
  ------------------------------------------------------------- 
 Mma warp MainloopPipe CONSUMER stage, phase, count: 2 0 2 13
-tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 2, 6
-tCrA_mk
-UMMA::DescriptorIterator o (_1,_1,_4):(_0,_0,_256)
-tCrB_nk
-UMMA::DescriptorIterator o (_1,_1):(_0,_0)
-tCrA_mk(_, _, k_block * 4 + i) layout
-(_1,_1):(_0,_0)
-decltype(size<0>(A))::value: 1
-decltype(size<0>(A))::value: 1
-size<2>(tCrA) / 4: 1
-k_block 0 :: Mma warp Accumulator pipe PRODUCER stage, phase, count, stages: 2, 1, 2, 4
-Mma warp acquiring accumulator pipeline...
-GEMM_DISPATCH V x M, V x N: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:297
-A Layout:
-(_1,_1):(_0,_0)C Layout:
-((_128,_16),_1,_1):((_65536,_1),_0,_0)A size: 8
-B size: 8
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:201
-GEMM_DISPATCH V x M, V x N: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:297
-A Layout:
-(_1,_1):(_0,_0)C Layout:
-((_128,_16),_1,_1):((_65536,_1),_0,_0)A size: 8
-B size: 8
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:201
-GEMM_DISPATCH V x M, V x N: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:297
-A Layout:
-(_1,_1):(_0,_0)C Layout:
-((_128,_16),_1,_1):((_65536,_1),_0,_0)A size: 8
-B size: 8
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:201
-GEMM_DISPATCH V x M, V x N: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:297
-A Layout:
-(_1,_1):(_0,_0)C Layout:
-((_128,_16),_1,_1):((_65536,_1),_0,_0)A size: 8
-B size: 8
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:201
-Committing mma for k_block k_tile: 0, 2
+0 o subptr[4b](0x1472b5018200.0)EPILOGUE_WARPS:Awaiting on accumulator pipe
+MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 2, 6
+,( o tCrA_mk
+EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 1, 6
+(_(UMMA::DescriptorIterator_tCgC
+(1 o 128_subptr[4b](0x1472b5018200.0))(,128 o )__,(
+164_(
+ ------------------------------------------------------------- 
+,)64__EPILOGUE_WARPS:Awaiting on accumulator pipe
+,)1281_,EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 1, 6
+,,1__tCgC
+_,1644subptr[4b](0x1472b5018200.0)_,))1 o _,:,(1_(1,(_1,1_0,6,128,_)6,_1:)_0,(:64,1((_),64(256,6,64)__),
+11_:tCrB_nk
+,)1(UMMA::DescriptorIterator_,)( o 1_,(64,0__,1,01__,,,10_6_),0)1,8192,:)_,8192:(0_,((,64__64_)6400,
+),,_tCgC_mn
+
+_81921subptr[4b](0x1472b5018220.0)tCgC_mn
+0,) o subptr[4b](0x1472b5018220.0))_(, o 
+64((_tCrA_mk(_, _, k_block * 4 + i) layout
+)_(0
+(128_,_tCgC_mn
+,128_1subptr[4b](0x1472b5018220.0)_,0, o 64__,()6418192(,)),__:,_1281(_64,,_1)__0,
+164,_tCgC_mn
+)_)1subptr[4b](0x1472b5018220.0)0:,))(_ o :
+(1((decltype(size<0>(A))::value: 1
+64,((decltype(size<0>(A))::value: 1
+,_64__size<2>(tCrA) / 4: 1
+1128,1k_block 0 :: Mma warp Accumulator pipe PRODUCER stage, phase, count, stages: 2, 1, 2, 4
+_),)1:Mma warp acquiring accumulator pipeline...
+_,)(64GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+_,(0)64_GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+,,,0__GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+_,011_)GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+,)0
+_,Committing mma for k_block k_tile: 0, 2
+)gSFC_mn
+1_
+gmem_
+ ------------------------------------------------------------- 
+)0gSFC_mn
+ptr[Mma warp MainloopPipe CONSUMER stage, phase, count: 3 0 3 13
+:,8gmem_MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 3, 6
+(_b](0x1472b5024200)ptr[tCrA_mk
+( o 08UMMA::DescriptorIterator64()b](0x1472b5024200) o ,_
+ o (_128(gSFC_mn
+_,1_gmem_1(128)ptr[,_,,_816(_1b](0x1472b5024200),_0, o __16,(44,__))_0128,:4),1()
+(,_,gSFC_mn
+_60116gmem_),,,:_ptr[6_(08)424,:b](0x1472b5024200)),(_ o (,25624(_)1,_0
+,(128,tCrB_nk
+6_,_UMMA::DescriptorIterator)0(1 o :,_)((16_,_241,30721,)_,,(,4___3072)410,,)),_1
+:_4tCgSFC_mn
+,(1)6gmem__)
+)ptr[0,tCgSFC_mn
+8,:3072gmem_b](0x1472b5024204)_(,0ptr[ o 24_)(8,4
+_b](0x1472b5024204)()tCrA_mk(_, _, k_block * 4 + i) layout
+128 o _
+,((0tCgSFC_mn
+(__,gmem__1128_ptr[16,,18,_()b](0x1472b5024204)_1_,4) o 163072)(:,,)(___:_128440(,)),24()
+_,_:tCgSFC_mn
+0(16()gmem__,24
+ptr[0_,decltype(size<0>(A))::value: 1
+,84(decltype(size<0>(A))::value: 1
+_b](0x1472b5024204))_size<2>(tCrA) / 4: 1
+1 o 0))k_block 0 :: Mma warp Accumulator pipe PRODUCER stage, phase, count, stages: 3, 1, 3, 4
+,:()Mma warp acquiring accumulator pipeline...
+_(_
+124GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+128
+ ------------------------------------------------------------- 
+),,EPILOGUE_WARPS:Awaiting on accumulator pipe
+GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+)((
+EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 2, 6
+__GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
 
  ------------------------------------------------------------- 
-Mma warp MainloopPipe CONSUMER stage, phase, count: 3 0 3 13
-tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 3, 6
-tCrA_mk
-UMMA::DescriptorIterator o (_1,_1,_4):(_0,_0,_256)
-tCrB_nk
-UMMA::DescriptorIterator o (_1,_1):(_0,_0)
-tCrA_mk(_, _, k_block * 4 + i) layout
-(_1,_1):(_0,_0)
-decltype(size<0>(A))::value: 1
-decltype(size<0>(A))::value: 1
-size<2>(tCrA) / 4: 1
-k_block 0 :: Mma warp Accumulator pipe PRODUCER stage, phase, count, stages: 3, 1, 3, 4
-Mma warp acquiring accumulator pipeline...
-GEMM_DISPATCH V x M, V x N: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:297
-A Layout:
-(_1,_1):(_0,_0)C Layout:
-((_128,_16),_1,_1):((_65536,_1),_0,_0)A size: 8
-B size: 8
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:201
-GEMM_DISPATCH V x M, V x N: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:297
-A Layout:
-(_1,_1):(_0,_0)C Layout:
-((_128,_16),_1,_1):((_65536,_1),_0,_0)A size: 8
-B size: 8
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:201
-GEMM_DISPATCH V x M, V x N: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:297
-A Layout:
-(_1,_1):(_0,_0)C Layout:
-((_128,_16),_1,_1):((_65536,_1),_0,_0)A size: 8
-B size: 8
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:201
-GEMM_DISPATCH V x M, V x N: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:297
-A Layout:
-(_1,_1):(_0,_0)C Layout:
-((_128,_16),_1,_1):((_65536,_1),_0,_0)A size: 8
-B size: 8
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:201
-Committing mma for k_block k_tile: 0, 3
+0tCgC
+16EPILOGUE_WARPS:Awaiting on accumulator pipe
+,GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+subptr[4b](0x1472b5018200.0),_EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 2, 6
+ o _Committing mma for k_block k_tile: 0, 3
+1tCgC
+(4
+ ------------------------------------------------------------- 
+)(subptr[4b](0x1472b5018200.0)))_Mma warp MainloopPipe CONSUMER stage, phase, count: 4 0 4 13
+ o )
+128(MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 4, 6
+:,
+ ------------------------------------------------------------- 
+(tCrA_mk
+(__UMMA::DescriptorIteratorEPILOGUE_WARPS:Awaiting on accumulator pipe
+2464128 o EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 2, 6
+,),((tCgC
+,____subptr[4b](0x1472b5018200.0)16401, o ),,_(,___1(1,11_,_,128)14_,),)1_
+6:,64
+ ------------------------------------------------------------- 
+)(1):EPILOGUE_WARPS:Awaiting on accumulator pipe
+_,,(0EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 2, 6
+6_(,)tCgC
+164_:subptr[4b](0x1472b5018200.0),,0(_,_ o (1_1(64256,),()1,__
+_,1128tCrB_nk
+06),UMMA::DescriptorIterator,),_ o _:_(640(0_),(,1,819264_,,_,0__1,_164,8192)1)_,:)
+_(1,tCgC_mn
+_64,_subptr[4b](0x1472b5018240.0)0)10 o ,
+,,(_tCgC_mn
+_6(0subptr[4b](0x1472b5018240.0)0)_) o ,128:
+(8192,(tCrA_mk(_, _, k_block * 4 + i) layout
+(_,((_64__64128)641,,,),____
+64111tCgC_mn
+)),)subptr[4b](0x1472b5018240.0),,_: o _1_(()10_(:0,,_,(__128_(100,64),),_:8192
+_64(,decltype(size<0>(A))::value: 1
+1)(_decltype(size<0>(A))::value: 1
+),6464size<2>(tCrA) / 4: 1
+,_,)_k_block 0 :: Mma warp Accumulator pipe PRODUCER stage, phase, count, stages: 0, 0, 4, 4
+1_
+0Mma warp acquiring accumulator pipeline...
+,1tCgC_mn
+,_)GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+subptr[4b](0x1472b5018240.0)_1, o 0GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+)_)(:0
+(GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+,(gSFC_mn
+__(GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+gmem_128064ptr[,Committing mma for k_block k_tile: 0, 4
+),8_
 
  ------------------------------------------------------------- 
-Mma warp MainloopPipe CONSUMER stage, phase, count: 4 0 4 13
-tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 4, 6
-tCrA_mk
-UMMA::DescriptorIterator o (_1,_1,_4):(_0,_0,_256)
-tCrB_nk
-UMMA::DescriptorIterator o (_1,_1):(_0,_0)
-tCrA_mk(_, _, k_block * 4 + i) layout
-(_1,_1):(_0,_0)
-decltype(size<0>(A))::value: 1
-decltype(size<0>(A))::value: 1
+_b](0x1472b5024200)64gSFC_mn
+Mma warp MainloopPipe CONSUMER stage, phase, count: 5 0 5 13
+1 o )gmem_()MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 5, 6
+ptr[,_,tCrA_mk
+8_128_UMMA::DescriptorIteratorb](0x1472b5024200)1,0 o  o ,(,((_____11601128),),,:_
+_(4(1gSFC_mn
+_)(,gmem_,1664_ptr[1,,48,__)b](0x1472b5024200)641: o ))()(:,_,_(01_12824,,0,,_6,((0)__,_:016_0(),256,24
+_)_,gSFC_mn
+
+41(gmem_)tCrB_nk
+)_ptr[,,UMMA::DescriptorIterator083072 o 1,b](0x1472b5024200),,(_ o __61(41))_),:,128
+_(3072,tCgSFC_mn
+124,()gmem__,_:ptr[4((168)__,b](0x1472b5024208)
+00 o _tCgSFC_mn
+,,(4__gmem__)01ptr[128,))8,1
+,b](0x1472b5024208)(,tCrA_mk(_, _, k_block * 4 + i) layout
+3072 o _6,(16()___,:12814_(,,4)24(_)
+_,)1tCgSFC_mn
+16(:)gmem_,_(:ptr[_24(084_,,b](0x1472b5024208))0(_ o ),_1(:_0)_(0,,12824)_3072,,1
+,(()decltype(size<0>(A))::value: 1
+___)decltype(size<0>(A))::value: 1
+4160
 size<2>(tCrA) / 4: 1
-k_block 0 :: Mma warp Accumulator pipe PRODUCER stage, phase, count, stages: 0, 0, 4, 4
+,,)
+ ------------------------------------------------------------- 
+k_block 0 :: Mma warp Accumulator pipe PRODUCER stage, phase, count, stages: 1, 0, 5, 4
+__
+EPILOGUE_WARPS:Awaiting on accumulator pipe
 Mma warp acquiring accumulator pipeline...
+41tCgSFC_mn
+EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 3, 6
+GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+))gmem_tCgC
+))ptr[GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+subptr[4b](0x1472b5018200.0):
+8 o (GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+b](0x1472b5024208)
+ ------------------------------------------------------------- 
+(24 o EPILOGUE_WARPS:Awaiting on accumulator pipe
+(GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+,(_EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 3, 6
+(_128Committing mma for k_block k_tile: 0, 5
+tCgC
+_,128subptr[4b](0x1472b5018200.0)0_ o ,,64((_)(_1,16_)_,128)1,_
+,_4
+ ------------------------------------------------------------- 
+_64)1EPILOGUE_WARPS:Awaiting on accumulator pipe
+)),EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 3, 6
+,:1_tCgC
+(,1246subptr[4b](0x1472b5018200.0),,) o _(:(1_((,0(_1,64,128_,6,1_)_)1:64))(),(
+,_64
+ ------------------------------------------------------------- 
+_0,1EPILOGUE_WARPS:Awaiting on accumulator pipe
+,_,EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 3, 6
+_1_0tCgC
+)1,,subptr[4b](0x1472b5018200.0),8192_ o 1,0(,_,(664__))0128
+:,,tCgC_mn
+(_8192subptr[4b](0x1472b5018260.0)(,64 o _64)(64,,()___
+11128tCgC_mn
+),,subptr[4b](0x1472b5018260.0),__ o _164(0,)(,1,__,_128061,,_),819264_:,)(1_,()64_64:)1,(
+,_(tCgC_mn
+_1641subptr[4b](0x1472b5018260.0)),) o ,_:(1_(()0(_,64,128__,,00__,1,64_)8192)0,,,)___
+0641gSFC_mn
+),,gmem__
+_ptr[tCgC_mn
+018)subptr[4b](0x1472b5018260.0))b](0x1472b5024200)
+ o : o gSFC_mn
+(((gmem_((__ptr[641288128,,b](0x1472b5024200),_(_ o _1(6416))_,,128,__,_40(1),_,,_16_10,1,)_)6
+4:)gSFC_mn
+)(:gmem_,((ptr[164248,,,b](0x1472b5024200)6_( o )1_(:)0_(,,12824__,,01((,)___,16003072,,),__
+_41gSFC_mn
+4))gmem_),,ptr[
+130728tCgSFC_mn
+,,b](0x1472b5024200)gmem_6_ o ptr[)4(8:)_b](0x1472b502420c)
+(128 o tCgSFC_mn
+24,(,gmem_(_ptr[(_1288_16,b](0x1472b502420c)0,( o ,__(_164_1,128))_,,,4(13072)_,,)616_:,)4(_:)244(
+,)24tCgSFC_mn
+(),gmem__(:ptr[0_(8,240b](0x1472b502420c)_,, o 1(_()1__)0)
+128,,,
+ ------------------------------------------------------------- 
+_3072(EPILOGUE_WARPS:Awaiting on accumulator pipe
+,1_EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 4, 6
+)_164)tCgC
+,
+)subptr[4b](0x1472b5018200.0)_
+
+ ------------------------------------------------------------- 
+ o 4tCgSFC_mn
+(EPILOGUE_WARPS:Awaiting on accumulator pipe
+)gmem_(EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 4, 6
+)ptr[_tCgC
+:1288subptr[4b](0x1472b5018200.0)(,b](0x1472b502420c) o 24_ o (,64((()___,1281280_,,,1(__,64_1_)16)1,,),__
+114
+ ------------------------------------------------------------- 
+,),6EPILOGUE_WARPS:Awaiting on accumulator pipe
+_))1:EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 4, 6
+:,(tCgC
+(124subptr[4b](0x1472b5018200.0)(,, o 646(,()__(:01_(,)128(_,,641__,)064_),)1
+_,)0
+ ------------------------------------------------------------- 
+_,,EPILOGUE_WARPS:Awaiting on accumulator pipe
+1_8192,0EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 4, 6
+,,_tCgC
+__164subptr[4b](0x1472b5018200.0)0,) o ,1
+(8192,tCgC_mn
+,(6subptr[4b](0x1472b5018280.0)__) o 64128:(,)((
+_(_tCgC_mn
+6464128)subptr[4b](0x1472b5018280.0),,, o __(_1641())_,,,_128__,110,_,,641__),10,6),_):81921:(,,((__(6464164,)),_
+:_1tCgC_mn
+(1)(subptr[4b](0x1472b5018280.0)),64 o _,,(0__(,01__),1280,_,)_0_
+0,64gSFC_mn
+,8192)gmem__,,ptr[0__8)641b](0x1472b5024200)
+), o 
+gSFC_mn
+_(tCgC_mn
+gmem_1_ptr[subptr[4b](0x1472b5018280.0))1288 o :,b](0x1472b5024200)((( o ((__(6416128_,,128,___,14(64))_),,,16_1,_,01_6,4,)_)_:0,1())124
+,:,gSFC_mn
+6((gmem_)(_ptr[:6408(,,b](0x1472b5024200)24__ o ,11()()_,_,128_03072,0,,(_,__1_416)0),,)
+_3072
+tCgSFC_mn
+4,gSFC_mn
+gmem__)gmem_ptr[4,ptr[8)18b](0x1472b5024210)
+,b](0x1472b5024200) o tCgSFC_mn
+6 o (gmem_)(_ptr[:_1288(,128b](0x1472b5024210)24( o ,,(_((__16_128,160,_,,(_4__4)116))),,:,_1(30724,24,)6,_))(4::_)((0
+2424,tCgSFC_mn
+,,_gmem_((1ptr[__)800)b](0x1472b5024210),,
+ o __
+ ------------------------------------------------------------- 
+(11EPILOGUE_WARPS:Awaiting on accumulator pipe
+_))EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 5, 6
+128),,tCgC
+
+3072(
+ ------------------------------------------------------------- 
+subptr[4b](0x1472b5018200.0),_ o _EPILOGUE_WARPS:Awaiting on accumulator pipe
+16(4EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 5, 6
+,()tCgC
+__
+subptr[4b](0x1472b5018200.0)4128tCgSFC_mn
+ o ),(gmem_)_ptr[(:648_()128b](0x1472b5024210)24,, o ,__(1(64_,_)128_0,,1,_(,__111,16,)_,6)1_)
+,4:1
+ ------------------------------------------------------------- 
+)(,EPILOGUE_WARPS:Awaiting on accumulator pipe
+()664EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 5, 6
+:),tCgC
+(:_(subptr[4b](0x1472b5018200.0)241(, o )64((,_,(_0__01,128,)__,,10__),64)08192),
+,,__
+ ------------------------------------------------------------- 
+_0641EPILOGUE_WARPS:Awaiting on accumulator pipe
+,),EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 5, 6
+8192
+_,tCgC
+tCgC_mn
+1_subptr[4b](0x1472b5018200.0)subptr[4b](0x1472b50182a0.0),64 o  o 1)((
+,((tCgC_mn
+6__subptr[4b](0x1472b50182a0.0))128128 o :,,((_(_(6464_64)128),,,,____11641),),,_,__1_10)1,,:,1_(_,0(1664,)),8192::_,((1_(()6464,64),,_
+_0_tCgC_mn
+1,1subptr[4b](0x1472b50182a0.0))_) o ,0,(_)_(0
+0_,gSFC_mn
+,128__gmem_,00ptr[_),864
+8192b](0x1472b5024200))gSFC_mn
+, o ,gmem__(_ptr[64_18)128,b](0x1472b5024200)
+,_ o tCgC_mn
+(1(subptr[4b](0x1472b50182a0.0)_)_ o 16:128(,(,(_((_464_128),16,,_,_11_64,)4)6,),)_,_:011(,,,24_6_,0)1():)_
+:(0gSFC_mn
+24(,gmem_,(_ptr[(6418_,)b](0x1472b5024200)0_, o ,13072(_),_1,_128_)4,,0)(3072,
+_,_tCgSFC_mn
+16_0gmem_,4)ptr[_)
+84
+gSFC_mn
+b](0x1472b5024214))tCgSFC_mn
+gmem_ o ,gmem_ptr[(1ptr[8_,8b](0x1472b5024200)1286b](0x1472b5024214) o ,) o ((:(__(_1281624128,,,,(_((_4__16)016,),,_:__4(14)24)),,,)1(3072:,_,(60_24),4,:_)((1
+_24)tCgSFC_mn
+0,)gmem_,(
+ptr[__810b](0x1472b5024214)),) o _
+(1_)128,,3072(,__164,)_
+4tCgSFC_mn
+)gmem_)ptr[:8(b](0x1472b5024214)24 o ,((__1280,,(__116),)_
+4)):(24,(_0,_1))
