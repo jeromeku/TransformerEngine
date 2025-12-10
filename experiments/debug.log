@@ -42,9 +42,9 @@ Sw<3,4,3> o smem_ptr[16b](unset) o (((_64,_2),(_8,_2)),_1,_4,(_1,_13)):(((_1,_51
 sB
 Sw<1,4,3> o smem_ptr[16b](unset) o ((_16,_16),_1,_1,(_1,_13)):((_1,_16),_0,_0,(_0,_256))
 gA_mk
-gmem_ptr[16b](0xd87ab000000) o (_128,_64,1,6):(_1,128,_128,8192)
+gmem_ptr[16b](0x7098f000000) o (_128,_64,1,6):(_1,128,_128,8192)
 gB_nk
-gmem_ptr[16b](0xd87ab018000) o (_16,_16,1,1):(_1,16,_16,256)
+gmem_ptr[16b](0x7098f018000) o (_16,_16,1,1):(_1,16,_16,256)
 
  ------------------------------------------------------------- 
 mA
@@ -52,7 +52,7 @@ ArithTuple(_0,_0) o (128,384):(_1@0,_1@1)
 mB
 ArithTuple(_0,_0) o (16,16):(_1@0,_1@1)
 mC
-subptr[4b](0xd87ab018200.0) o (128,384):(64,_1)
+subptr[4b](0x7098f018200.0) o (128,384):(64,_1)
 sfc_layout
 (128,((_16,_4),6)):(24,((_0,_1),_4))
 
@@ -70,13 +70,13 @@ ArithTuple(_0,_0) o (_128,_64,1,6):(_1@0,_1@1,_128@0,_64@1)
 gB_nk
 ArithTuple(_0,_0) o (_16,_16,1,1):(_1@0,_1@1,_16@0,_16@1)
 gC_mn
-subptr[4b](0xd87ab018200.0) o (_128,_64,1,6):(64,_1,8192,_64)
+subptr[4b](0x7098f018200.0) o (_128,_64,1,6):(64,_1,8192,_64)
 gSFC_mn
-gmem_ptr[8b](0xd87ab024200) o (_128,(_16,_4),1,6):(24,(_0,_1),3072,_4)
+gmem_ptr[8b](0x7098f024200) o (_128,(_16,_4),1,6):(24,(_0,_1),3072,_4)
 tCsA
-Sw<3,4,3>_smem_ptr[16b](0xd8800000580) o (((_64,_2),(_8,_2)),_1,_4,(_1,_13)):(((_1,_512),(_64,_1024)),_0,_2048,(_0,_8192))
+Sw<3,4,3>_smem_ptr[16b](0x70a00000580) o (((_64,_2),(_8,_2)),_1,_4,(_1,_13)):(((_1,_512),(_64,_1024)),_0,_2048,(_0,_8192))
 tCsB
-Sw<1,4,3>_smem_ptr[16b](0xd8800034580) o ((_16,_16),_1,_1,(_1,_13)):((_1,_16),_0,_0,(_0,_256))
+Sw<1,4,3>_smem_ptr[16b](0x70a00034580) o ((_16,_16),_1,_1,(_1,_13)):((_1,_16),_0,_0,(_0,_256))
 
  ------------------------------------------------------------- 
 thr_mma
@@ -141,7 +141,7 @@ tmem_[32b](0x0000.0000) o ((_128,_64),_1,_1,_4):((_65536,_1),_0,_0,_64)
 tAgA
 ArithTuple(_0,_0) o (((_64,_8),(_2,_8)),1,6):(((_1@0,_1@1),(_64@0,_8@1)),_128@0,_64@1)
 tAsA
-Sw<3,4,3>_smem_ptr[16b](0xd8800000580) o ((_512,_16),(_1,_13)):((_1,_512),(_0,_8192))
+Sw<3,4,3>_smem_ptr[16b](0x70a00000580) o ((_512,_16),(_1,_13)):((_1,_512),(_0,_8192))
 tBgB
 ArithTuple(_0,_0) o (((_16,_16),_1),1,1):(((_1@0,_1@1),_0),_16@0,_16@1)
 tBsB
@@ -153,232 +153,73 @@ Initialize TMA Load B...
  ------------------------------------------------------------- 
 
  ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
 DMA WARP EXITING!!!
-EPILOGUE_WARP::Arrived and waiting on TMEM
 Mma warp finished allocating TMEM!!!
-EPILOGUE_WARP::Arrived and waiting on TMEM
-EPILOGUE_WARP::Arrived and waiting on TMEM
 EPILOGUE_WARP::Arrived and waiting on TMEM
 Mma warp acquiring accumulator pipeline stage: 0
 
  ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
-EPILOGUE_WARPS:Awaiting on accumulator pipe: 0
-EPILOGUE_WARPS:Awaiting on accumulator pipe: 0
-EPILOGUE_WARPS:Awaiting on accumulator pipe: 0
-EPILOGUE_WARPS:Awaiting on accumulator pipe: 0
-EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 0, 6
-EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 0, 6
-EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 0, 6
-EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 0, 6
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
 Committing mma for k_block k_tile, stage: 0, 0, 0
+EPILOGUE_WARPS:Awaiting on accumulator pipe: 0
 
  ------------------------------------------------------------- 
-EPILOGUE_WARPS Releasing accumulator pipeline: 0
-EPILOGUE_WARPS Releasing accumulator pipeline: 0
-EPILOGUE_WARPS Releasing accumulator pipeline: 0
+EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 0, 6
 Mma warp acquiring accumulator pipeline stage: 1
 EPILOGUE_WARPS Releasing accumulator pipeline: 0
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
-EPILOGUE_WARPS:Awaiting on accumulator pipe: 1
-EPILOGUE_WARPS:Awaiting on accumulator pipe: 1
-EPILOGUE_WARPS:Awaiting on accumulator pipe: 1
-EPILOGUE_WARPS:Awaiting on accumulator pipe: 1
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
-EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 1, 6
-EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 1, 6
-EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 1, 6
-EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 1, 6
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
 Committing mma for k_block k_tile, stage: 0, 1, 1
 
  ------------------------------------------------------------- 
-EPILOGUE_WARPS Releasing accumulator pipeline: 1
-EPILOGUE_WARPS Releasing accumulator pipeline: 1
+
+ ------------------------------------------------------------- 
+
+ ------------------------------------------------------------- 
 Mma warp acquiring accumulator pipeline stage: 2
-EPILOGUE_WARPS Releasing accumulator pipeline: 1
-EPILOGUE_WARPS Releasing accumulator pipeline: 1
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
-EPILOGUE_WARPS:Awaiting on accumulator pipe: 2
-EPILOGUE_WARPS:Awaiting on accumulator pipe: 2
-EPILOGUE_WARPS:Awaiting on accumulator pipe: 2
-EPILOGUE_WARPS:Awaiting on accumulator pipe: 2
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
-EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 2, 6
-EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 2, 6
-EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 2, 6
-EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 2, 6
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
+EPILOGUE_WARPS:Awaiting on accumulator pipe: 1
 Committing mma for k_block k_tile, stage: 0, 2, 2
+EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 1, 6
 
  ------------------------------------------------------------- 
-EPILOGUE_WARPS Releasing accumulator pipeline: 2
-EPILOGUE_WARPS Releasing accumulator pipeline: 2
+EPILOGUE_WARPS Releasing accumulator pipeline: 1
 Mma warp acquiring accumulator pipeline stage: 3
-EPILOGUE_WARPS Releasing accumulator pipeline: 2
-EPILOGUE_WARPS Releasing accumulator pipeline: 2
 
  ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
-EPILOGUE_WARPS:Awaiting on accumulator pipe: 3
-EPILOGUE_WARPS:Awaiting on accumulator pipe: 3
-EPILOGUE_WARPS:Awaiting on accumulator pipe: 3
-EPILOGUE_WARPS:Awaiting on accumulator pipe: 3
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
-EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 3, 6
-EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 3, 6
-EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 3, 6
-EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 3, 6
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
 Committing mma for k_block k_tile, stage: 0, 3, 3
 
  ------------------------------------------------------------- 
-EPILOGUE_WARPS Releasing accumulator pipeline: 3
-EPILOGUE_WARPS Releasing accumulator pipeline: 3
-EPILOGUE_WARPS Releasing accumulator pipeline: 3
+
+ ------------------------------------------------------------- 
+EPILOGUE_WARPS:Awaiting on accumulator pipe: 2
 Mma warp acquiring accumulator pipeline stage: 0
+EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 2, 6
+Committing mma for k_block k_tile, stage: 0, 4, 0
+EPILOGUE_WARPS Releasing accumulator pipeline: 2
+
+ ------------------------------------------------------------- 
+
+ ------------------------------------------------------------- 
+Mma warp acquiring accumulator pipeline stage: 1
+
+ ------------------------------------------------------------- 
+Committing mma for k_block k_tile, stage: 0, 5, 1
+EPILOGUE_WARPS:Awaiting on accumulator pipe: 3
+
+ ------------------------------------------------------------- 
+EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 3, 6
+MMA_WARP::releasing TMEM
 EPILOGUE_WARPS Releasing accumulator pipeline: 3
 
  ------------------------------------------------------------- 
 
  ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
-EPILOGUE_WARPS:Awaiting on accumulator pipe: 0
-EPILOGUE_WARPS:Awaiting on accumulator pipe: 0
-EPILOGUE_WARPS:Awaiting on accumulator pipe: 0
 EPILOGUE_WARPS:Awaiting on accumulator pipe: 0
 EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 4, 6
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
-EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 4, 6
-EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 4, 6
-EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 4, 6
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
-Committing mma for k_block k_tile, stage: 0, 4, 0
-
- ------------------------------------------------------------- 
-EPILOGUE_WARPS Releasing accumulator pipeline: 0
-EPILOGUE_WARPS Releasing accumulator pipeline: 0
-Mma warp acquiring accumulator pipeline stage: 1
-EPILOGUE_WARPS Releasing accumulator pipeline: 0
 EPILOGUE_WARPS Releasing accumulator pipeline: 0
 
  ------------------------------------------------------------- 
 
  ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
 EPILOGUE_WARPS:Awaiting on accumulator pipe: 1
-EPILOGUE_WARPS:Awaiting on accumulator pipe: 1
-EPILOGUE_WARPS:Awaiting on accumulator pipe: 1
-EPILOGUE_WARPS:Awaiting on accumulator pipe: 1
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
 EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 5, 6
-EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 5, 6
-EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 5, 6
-EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 5, 6
-GEMM_DISPATCH V x V: /home/jk/transformerengine/3rdparty/cutlass/include/cute/algorithm/gemm.hpp:203
-Committing mma for k_block k_tile, stage: 0, 5, 1
-
- ------------------------------------------------------------- 
-MMA_WARP::releasing TMEM
 EPILOGUE_WARPS Releasing accumulator pipeline: 1
-EPILOGUE_WARPS Releasing accumulator pipeline: 1
-EPILOGUE_WARPS Releasing accumulator pipeline: 1
-EPILOGUE_WARPS Releasing accumulator pipeline: 1
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
 
  ------------------------------------------------------------- 
