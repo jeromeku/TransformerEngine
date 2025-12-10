@@ -95,10 +95,9 @@ __global__ static void rht_gemm_device(
     AStride dA, ASmemLayout sAlayout,
     CUTE_GRID_CONSTANT TmaLoadA const tma_load_a, TB const* B, BStride dB,
     BSmemLayout sBlayout, CUTE_GRID_CONSTANT TmaLoadB const tma_load_b, TC_* C,
-    CStride dC, CSmemLayout, TSFC_* SFC, TiledMMA mma)
-// float const* global_amax,
-// const size_t* rng_state)
-{
+    CStride dC, CSmemLayout, TSFC_* SFC, TiledMMA mma, float const* global_amax,
+    const size_t* rng_state) {
+    
     using X = Underscore;
     using TC = cute::float_e2m1_t;
     using TSFC = cute::float_e4m3_t;
@@ -488,8 +487,9 @@ __global__ static void rht_gemm_device(
         tmem_allocation_result_barrier.arrive();
         uint32_t tmem_base_ptr = shared_storage.tmem_base_ptr;
         bulk_tmem_mma.data() = tmem_base_ptr;
-        
-        PRINT_ONE_THREAD(PRINT_DELIMITER; printf("Mma warp finished allocating TMEM!!!\n");)
+
+        PRINT_ONE_THREAD(PRINT_DELIMITER;
+                         printf("Mma warp finished allocating TMEM!!!\n");)
 
         do {
             uint32_t skip_wait = K_TILE_MAX <= 0;
@@ -515,15 +515,18 @@ __global__ static void rht_gemm_device(
                         mainloop_pipe_consumer_state.count(),
                         MainloopPipelineState::Stages);
                     printf(
-                        "tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX"
+                        "MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX"
                         ": %d, %d, %d, %d\n",
                         tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX);
                     print_cute("tCrA_mk", tCrA_mk);
                     print_cute("tCrB_nk", tCrB_nk);
-                    print_cute("tCrA_mk(_, _, k_block * 4 + i) layout", tCrA_mk(_, _, 0).layout());
+                    print_cute("tCrA_mk(_, _, k_block * 4 + i) layout",
+                               tCrA_mk(_, _, 0).layout());
                     auto A = tCrA_mk(_, _, 0);
-                    printf("decltype(size<0>(A))::value: %d\n", decltype(size<0>(A))::value);
-                    printf("decltype(size<0>(A))::value: %d\n", decltype(size<0>(tCrB_nk))::value);
+                    printf("decltype(size<0>(A))::value: %d\n",
+                           decltype(size<0>(A))::value);
+                    printf("decltype(size<0>(A))::value: %d\n",
+                           decltype(size<0>(tCrB_nk))::value);
                     printf("size<2>(tCrA) / 4: %d\n", size<2>(tCrA) / 4);
                 }
 
@@ -531,14 +534,17 @@ __global__ static void rht_gemm_device(
                 for (int k_block = 0; k_block < size<2>(tCrA) / 4; ++k_block) {
                     if (elect_one_sync()) {
                         printf(
-                            "k_block %d :: Mma warp Accumulator pipe PRODUCER stage, "
-                            "phase, count, stages: %d, %d, %d, %d\n", k_block,
-                            accumulator_pipe_producer_state.index(),
+                            "k_block %d :: Mma warp Accumulator pipe PRODUCER "
+                            "stage, "
+                            "phase, count, stages: %d, %d, %d, %d\n",
+                            k_block, accumulator_pipe_producer_state.index(),
                             accumulator_pipe_producer_state.phase(),
                             accumulator_pipe_producer_state.count(),
                             AccumulatorPipelineState::Stages);
                     }
-                    PRINT_ONE_THREAD(printf("Mma warp acquiring accumulator pipeline...\n"););
+                    PRINT_ONE_THREAD(
+                        printf(
+                            "Mma warp acquiring accumulator pipeline...\n"););
                     accumulator_pipeline.producer_acquire(
                         accumulator_pipe_producer_state);
                     CUTE_UNROLL
@@ -549,8 +555,11 @@ __global__ static void rht_gemm_device(
                         gemm(mma, tCrA_mk(_, _, k_block * 4 + i), tCrB_nk,
                              accumulators);
                     }
-                    // Issues a umma_arrive (commit) tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64
-                    PRINT_ONE_THREAD(printf("Committing mma for k_block k_tile: %d, %d\n", k_block, k_tile);)
+                    // Issues a umma_arrive (commit)
+                    // tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64
+                    PRINT_ONE_THREAD(
+                        printf("Committing mma for k_block k_tile: %d, %d\n",
+                               k_block, k_tile);)
 
                     accumulator_pipeline.producer_commit(
                         accumulator_pipe_producer_state);
@@ -577,125 +586,200 @@ __global__ static void rht_gemm_device(
         tmem_allocator.free(tmem_base_ptr,
                             TmemAllocator::Sm100TmemCapacityColumns);
     } else if (is_epilogue_warp) {
-    const float global_amax_val = *global_amax;
-    static constexpr int FragmentSize = 256 / sizeof_bits_v<TC>;
+        const float global_amax_val = *global_amax;
+        static constexpr int FragmentSize = 256 / sizeof_bits_v<TC>;
 
-    // this is a barrier.sync
-    tmem_allocation_result_barrier.arrive_and_wait();
-    uint32_t tmem_base_ptr = shared_storage.tmem_base_ptr;
-    bulk_tmem_epilogue.data() = tmem_base_ptr;
-    int thread_idx = threadIdx.x % 128;
+        // this is a barrier.sync
+        PRINT_ONE_THREAD(printf("EPILOGUE_WARP::Arrived and waiting on TMEM\n"););
 
-    Tensor tCgC = thr_mma_epilogue.partition_C(gC_mn);                             // (MMA,MMA_M,MMA_N)                             // (MMA,MMA_M,MMA_N)
-    auto tiled_t2r = make_tmem_copy(TMEM_LOAD_NEW{}, bulk_tmem_epilogue(_,_,_,_0{}));
-    auto tiled_r2g = make_tiled_copy_D(Copy_Atom<SM100_STORE_256bit_CACHE_NOALLOCATION, TC>{}, tiled_t2r);
-    auto thr_t2r   = tiled_t2r.get_slice(thread_idx);
-    auto thr_r2g = tiled_r2g.get_slice(thread_idx);
+        tmem_allocation_result_barrier.arrive_and_wait();
+        uint32_t tmem_base_ptr = shared_storage.tmem_base_ptr;
+        bulk_tmem_epilogue.data() = tmem_base_ptr;
+        int thread_idx = threadIdx.x % 128;
 
-    // NVFP4 non-E8 recipe constants and global scales
-    static constexpr float fp4_max = 6.0f;
-
-    const float global_encode_scale = ComputeGlobalEncodeScaleFP4(global_amax_val);
-    const float global_decode_scale = 1.0f / global_encode_scale;
-    auto sfd_converter = cutlass::NumericConverter<TSFC, float>{};
-
-    do {
-      for (int k_tile = 0; k_tile < K_TILE_MAX && k_tile + tile_idx_n < tiles_in_n; ++k_tile) {
-        Tensor tCgC_mn = tCgC(_,_,_,tile_idx_m,tile_idx_n+k_tile);
-
-        Tensor tCgSFC_mn = gSFC_mn(_,_,tile_idx_m,tile_idx_n+k_tile);
-        accumulator_pipeline.consumer_wait(accumulator_pipe_consumer_state);
-
-        auto tCtC = bulk_tmem_epilogue(_,_,_,accumulator_pipe_consumer_state.index());
-        Tensor tDtC = thr_t2r.partition_S(tCtC);                   // ((TMEM_LOAD,#TMEM_LOAD),MMA_M,MMA_N)
-        Tensor tDgC = thr_t2r.partition_D(tCgC_mn);                   // ((TMEM_LOAD,#TMEM_LOAD),MMA_M,MMA_N)
-
-        Tensor tTR_rAcc = make_tensor<ElementAccumulator>(shape(tDgC));                 // ((TMEM_LOAD,#TMEM_LOAD),MMA_M,MMA_N)
-        Tensor tDrC = make_tensor<TC>(shape(tDgC));
-        Tensor tTR_rAcc_frag = recast<cutlass::Array<ElementAccumulator, FragmentSize>>(coalesce(tTR_rAcc));
-        Tensor tDrC_frag = recast<cutlass::Array<TC, FragmentSize>>(coalesce(tDrC));
-
-        Tensor src = thr_r2g.retile_S(tDrC);
-        Tensor dst = thr_r2g.retile_D(tDgC);
-
-        Tensor tCgSFC = make_tensor(tCgSFC_mn.data(), make_layout(
-                                    make_shape(shape(tCgSFC_mn), Int<1>{}, Int<1>{}),
-                                    make_stride(stride(tCgSFC_mn), Int<0>{}, Int<0>{})
-                                   ));
-
-        Tensor tDgSFC = filter(thr_t2r.partition_D(tCgSFC));
-        Tensor tDrSFC = make_tensor<TSFC>(shape(tDgSFC));
-
-        static constexpr int NumVecs = size(tDgC) / VectorSize;
-        Tensor tC_rRowSFD_frg = recast<cutlass::Array<TSFC, NumVecs>>(tDrSFC);
-
-        cutlass::maximum_absolute_value_reduction<cutlass::Array<ElementAccumulator, VectorSize>, true> amax_reduction;
-        cutlass::Array<ElementAccumulator, NumVecs> vec_maxs;
-        cutlass::Array<ElementAccumulator, NumVecs> pvscales;
-        // TMEM_LOAD
-        copy(tiled_t2r, tDtC, tTR_rAcc);
-        cutlass::arch::fence_view_async_tmem_load();
-
-        accumulator_pipeline.consumer_release(accumulator_pipe_consumer_state);
-
-        ++accumulator_pipe_consumer_state;
-
-        // Cast data from FP32 to BF16 to FP32.
-        auto convert_accum_to_bf16 = cutlass::NumericArrayConverter<cutlass::bfloat16_t, ElementAccumulator, FragmentSize>{};
-        auto convert_bf16_to_accum = cutlass::NumericArrayConverter<ElementAccumulator, cutlass::bfloat16_t, FragmentSize>{};
-        tTR_rAcc_frag(_0{}) = convert_bf16_to_accum(convert_accum_to_bf16(tTR_rAcc_frag(_0{})));
-
-        auto compute_frgs = reinterpret_cast<cutlass::Array< ElementAccumulator, VectorSize> *>(tTR_rAcc_frag.data());
-        auto output_frgs = reinterpret_cast<cutlass::Array< TC, VectorSize> *>(tDrC_frag.data());
-        CUTLASS_PRAGMA_UNROLL
-        for (int v = 0; v < NumVecs; v++) {
-          vec_maxs[v] = amax_reduction(ElementAccumulator(0), compute_frgs[v]);
+        Tensor tCgC =
+            thr_mma_epilogue
+                .partition_C(gC_mn);  // (MMA,MMA_M,MMA_N) // (MMA,MMA_M,MMA_N)
+        auto tiled_t2r =
+            make_tmem_copy(TMEM_LOAD_NEW{}, bulk_tmem_epilogue(_, _, _, _0{}));
+        auto tiled_r2g = make_tiled_copy_D(
+            Copy_Atom<SM100_STORE_256bit_CACHE_NOALLOCATION, TC>{}, tiled_t2r);
+        auto thr_t2r = tiled_t2r.get_slice(thread_idx);
+        auto thr_r2g = tiled_r2g.get_slice(thread_idx);
+    #if defined(DEBUG_EPILOGUE)
+        if(elect_one_sync()){
+            PRINT_DELIMITER; 
+            print_cute("EPILOGUE_WARP::tCgC", tCgC);
+            print_cute("EPILOGUE_WARP::tiled_t2r", tiled_t2r);
+            print_cute("EPILOGUE_WARP::tiled_r2g", tiled_r2g);
+            print_cute("EPILOGUE_WARP::thr_t2r", thr_t2r);
+            print_cute("EPILOGUE_WARP::tiled_r2g", thr_r2g);
         }
+    #endif            
+        // NVFP4 non-E8 recipe constants and global scales
+        static constexpr float fp4_max = 6.0f;
 
-        pvscales = cutlass::divides<cutlass::Array<ElementAccumulator, NumVecs>>{}(vec_maxs, fp4_max);
-        pvscales = cutlass::multiplies<cutlass::Array<ElementAccumulator, NumVecs>>{}(pvscales, global_encode_scale);
-        auto pvscales_cvted = cutlass::NumericArrayConverter<TSFC, ElementAccumulator, NumVecs>{}(pvscales);
+        const float global_encode_scale = 1.0f;
+//            ComputeGlobalEncodeScaleFP4(global_amax_val);
+        const float global_decode_scale = 1.0f / global_encode_scale;
+        auto sfd_converter = cutlass::NumericConverter<TSFC, float>{};
 
-        tC_rRowSFD_frg(_0{}) = pvscales_cvted;
-        auto qpvscale_ups = cutlass::NumericArrayConverter<ElementAccumulator, TSFC, NumVecs>{}(tC_rRowSFD_frg(_0{}));
-        auto qpvscale_scaled = cutlass::multiplies<cutlass::Array<ElementAccumulator, NumVecs>>{}(qpvscale_ups, global_decode_scale);
-        auto acc_scales = cutlass::divides<cutlass::Array<ElementAccumulator, NumVecs>>{}(1.0, qpvscale_scaled);
+        do {
+            for (int k_tile = 0;
+                 k_tile < K_TILE_MAX && k_tile + tile_idx_n < tiles_in_n;
+                 ++k_tile) {
+                Tensor tCgC_mn = tCgC(_, _, _, tile_idx_m, tile_idx_n + k_tile);
 
-        // Initialize RNG for tile
-        const size_t rng_sequence
-          = thread_idx + k_tile * 256 + linear_tile_idx * K_TILE_MAX * 256;
+                Tensor tCgSFC_mn =
+                    gSFC_mn(_, _, tile_idx_m, tile_idx_n + k_tile);
+                if(elect_one_sync()){
+                    PRINT_DELIMITER;
+                    printf("EPILOGUE_WARPS:Awaiting on accumulator pipe\n");
+                    printf(
+                        "EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX"
+                        ": %d, %d, %d, %d\n",
+                        tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX);
+                    print_cute("tCgC", tCgC);
+                    print_cute("tCgC_mn", tCgC_mn);
+                    print_cute("gSFC_mn", gSFC_mn);
+                    print_cute("tCgSFC_mn", tCgSFC_mn);
+                }
 
-        transformer_engine::curanddx::detail::philox4x32_native_state<10> rng;
-        rng.init(rng_seed, rng_sequence, rng_offset);
-        uint4 random_uint4 = uint4{0, 0, 0, 0};
+                accumulator_pipeline.consumer_wait(
+                    accumulator_pipe_consumer_state);
 
-        CUTLASS_PRAGMA_UNROLL
-        for (int v = 0; v < NumVecs; v++) {
-          auto acc_scale = cutlass::minimum_with_nan_propagation<ElementAccumulator>{}(acc_scales[v], cutlass::platform::numeric_limits<ElementAccumulator>::max());
-          // auto acc_scale = acc_scales[v];
-          if constexpr (kEnableStochasticRounding) {
-            random_uint4 = rng.generate4();
-            output_frgs[v] = StochasticNumericConverter(
-              cutlass::multiplies<cutlass::Array<ElementAccumulator, VectorSize>>{}(
-                compute_frgs[v],
-                acc_scale
-              ),
-              reinterpret_cast<cutlass::Array<uint32_t, 4>*>(&random_uint4));
-          } else {
-            output_frgs[v] = cutlass::NumericArrayConverter<TC, ElementAccumulator, VectorSize>{}(cutlass::multiplies<cutlass::Array<ElementAccumulator, VectorSize>>{}(compute_frgs[v], acc_scale));
-          }
-        }
+                auto tCtC = bulk_tmem_epilogue(
+                    _, _, _, accumulator_pipe_consumer_state.index());
+                Tensor tDtC = thr_t2r.partition_S(
+                    tCtC);  // ((TMEM_LOAD,#TMEM_LOAD),MMA_M,MMA_N)
+                Tensor tDgC = thr_t2r.partition_D(
+                    tCgC_mn);  // ((TMEM_LOAD,#TMEM_LOAD),MMA_M,MMA_N)
 
-        copy(tiled_r2g, src, dst);
+                Tensor tTR_rAcc = make_tensor<ElementAccumulator>(
+                    shape(tDgC));  // ((TMEM_LOAD,#TMEM_LOAD),MMA_M,MMA_N)
+                Tensor tDrC = make_tensor<TC>(shape(tDgC));
+                Tensor tTR_rAcc_frag =
+                    recast<cutlass::Array<ElementAccumulator, FragmentSize>>(
+                        coalesce(tTR_rAcc));
+                Tensor tDrC_frag =
+                    recast<cutlass::Array<TC, FragmentSize>>(coalesce(tDrC));
 
-        copy(AutoVectorizingCopyWithAssumedAlignment<128>{}, tDrSFC, tDgSFC);
+                Tensor src = thr_r2g.retile_S(tDrC);
+                Tensor dst = thr_r2g.retile_D(tDgC);
 
-      }
-      linear_tile_idx += gridDim.x;
-      tile_idx_m = linear_tile_idx % tiles_in_m;
-      tile_idx_n = (linear_tile_idx / tiles_in_m) * K_TILE_MAX;
-    } while (tile_idx_m < tiles_in_m && tile_idx_n < tiles_in_n);
-  }
+                Tensor tCgSFC = make_tensor(
+                    tCgSFC_mn.data(),
+                    make_layout(
+                        make_shape(shape(tCgSFC_mn), Int<1>{}, Int<1>{}),
+                        make_stride(stride(tCgSFC_mn), Int<0>{}, Int<0>{})));
+
+                Tensor tDgSFC = filter(thr_t2r.partition_D(tCgSFC));
+                Tensor tDrSFC = make_tensor<TSFC>(shape(tDgSFC));
+
+                static constexpr int NumVecs = size(tDgC) / VectorSize;
+                Tensor tC_rRowSFD_frg =
+                    recast<cutlass::Array<TSFC, NumVecs>>(tDrSFC);
+
+                cutlass::maximum_absolute_value_reduction<
+                    cutlass::Array<ElementAccumulator, VectorSize>, true>
+                    amax_reduction;
+                cutlass::Array<ElementAccumulator, NumVecs> vec_maxs;
+                cutlass::Array<ElementAccumulator, NumVecs> pvscales;
+                // TMEM_LOAD
+                copy(tiled_t2r, tDtC, tTR_rAcc);
+                cutlass::arch::fence_view_async_tmem_load();
+
+                accumulator_pipeline.consumer_release(
+                    accumulator_pipe_consumer_state);
+
+                ++accumulator_pipe_consumer_state;
+
+            #if 0
+                // Cast data from FP32 to BF16 to FP32.
+                auto convert_accum_to_bf16 = cutlass::NumericArrayConverter<
+                    cutlass::bfloat16_t, ElementAccumulator, FragmentSize>{};
+                auto convert_bf16_to_accum = cutlass::NumericArrayConverter<
+                    ElementAccumulator, cutlass::bfloat16_t, FragmentSize>{};
+                tTR_rAcc_frag(_0{}) = convert_bf16_to_accum(
+                    convert_accum_to_bf16(tTR_rAcc_frag(_0{})));
+
+                auto compute_frgs = reinterpret_cast<
+                    cutlass::Array<ElementAccumulator, VectorSize>*>(
+                    tTR_rAcc_frag.data());
+                auto output_frgs =
+                    reinterpret_cast<cutlass::Array<TC, VectorSize>*>(
+                        tDrC_frag.data());
+                CUTLASS_PRAGMA_UNROLL
+                for (int v = 0; v < NumVecs; v++) {
+                    vec_maxs[v] =
+                        amax_reduction(ElementAccumulator(0), compute_frgs[v]);
+                }
+
+                pvscales = cutlass::divides<
+                    cutlass::Array<ElementAccumulator, NumVecs>>{}(vec_maxs,
+                                                                   fp4_max);
+                pvscales = cutlass::multiplies<
+                    cutlass::Array<ElementAccumulator, NumVecs>>{}(
+                    pvscales, global_encode_scale);
+                auto pvscales_cvted =
+                    cutlass::NumericArrayConverter<TSFC, ElementAccumulator,
+                                                   NumVecs>{}(pvscales);
+
+                tC_rRowSFD_frg(_0{}) = pvscales_cvted;
+                auto qpvscale_ups = cutlass::NumericArrayConverter<
+                    ElementAccumulator, TSFC, NumVecs>{}(tC_rRowSFD_frg(_0{}));
+                auto qpvscale_scaled = cutlass::multiplies<
+                    cutlass::Array<ElementAccumulator, NumVecs>>{}(
+                    qpvscale_ups, global_decode_scale);
+                auto acc_scales = cutlass::divides<
+                    cutlass::Array<ElementAccumulator, NumVecs>>{}(
+                    1.0, qpvscale_scaled);
+
+                // Initialize RNG for tile
+                const size_t rng_sequence = thread_idx + k_tile * 256 +
+                                            linear_tile_idx * K_TILE_MAX * 256;
+
+                // transformer_engine::curanddx::detail::philox4x32_native_state<
+                //     10>
+                //     rng;
+                // rng.init(rng_seed, rng_sequence, rng_offset);
+                uint4 random_uint4 = uint4{0, 0, 0, 0};
+
+                CUTLASS_PRAGMA_UNROLL
+                for (int v = 0; v < NumVecs; v++) {
+                    auto acc_scale = cutlass::minimum_with_nan_propagation<
+                        ElementAccumulator>{}(acc_scales[v],
+                                              cutlass::platform::numeric_limits<
+                                                  ElementAccumulator>::max());
+                    // auto acc_scale = acc_scales[v];
+                    if constexpr (kEnableStochasticRounding) {
+                        // random_uint4 = rng.generate4();
+                        output_frgs[v] = StochasticNumericConverter(
+                            cutlass::multiplies<cutlass::Array<
+                                ElementAccumulator, VectorSize>>{}(
+                                compute_frgs[v], acc_scale),
+                            reinterpret_cast<cutlass::Array<uint32_t, 4>*>(
+                                &random_uint4));
+                    } else {
+                        output_frgs[v] = cutlass::NumericArrayConverter<
+                            TC, ElementAccumulator, VectorSize>{}(
+                            cutlass::multiplies<cutlass::Array<
+                                ElementAccumulator, VectorSize>>{}(
+                                compute_frgs[v], acc_scale));
+                    }
+                }
+
+                copy(tiled_r2g, src, dst);
+
+                copy(AutoVectorizingCopyWithAssumedAlignment<128>{}, tDrSFC,
+                     tDgSFC);
+            #endif
+            }
+            linear_tile_idx += gridDim.x;
+            tile_idx_m = linear_tile_idx % tiles_in_m;
+            tile_idx_n = (linear_tile_idx / tiles_in_m) * K_TILE_MAX;
+        } while (tile_idx_m < tiles_in_m && tile_idx_n < tiles_in_n);
+    }
 }
 
 int main() {
@@ -934,9 +1018,19 @@ int main() {
     uint8_t* SFC =
         reinterpret_cast<uint8_t*>(thrust::raw_pointer_cast(deviceSFC.data()));
 
+    float global_amax = 1.0f;
+    size_t rng = 1.0f;
+
+    float  *d_global_amax;
+    size_t *d_rng;
+    cudaMalloc(&d_global_amax, sizeof(float));
+    cudaMalloc(&d_rng,         sizeof(size_t));
+    cudaMemcpy(d_global_amax, &global_amax, sizeof(float),  cudaMemcpyHostToDevice);
+    cudaMemcpy(d_rng,         &rng,         sizeof(size_t), cudaMemcpyHostToDevice);
+
     (*kernel_ptr)<<<dimGrid, dimBlock, smem_size>>>(
         M, N, k_tile_size, cga_tile_shape,
         thrust::raw_pointer_cast(deviceA.data()), dA, sA, tma_load_a,
         thrust::raw_pointer_cast(deviceB.data()), dB, sB, tma_load_b, C, dC, sC,
-        SFC, mma);
+        SFC, mma, d_global_amax, d_rng);
 }
