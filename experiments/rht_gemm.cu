@@ -450,7 +450,54 @@ __global__ static void rht_gemm_device(
 
         } while (tile_idx_m < tiles_in_m && tile_idx_n < tiles_in_n);
         // mainloop_pipeline.producer_tail(mainloop_pipe_producer_state);
-    }
+    } else if (is_mma_warp) {
+    mma.accumulate_ = UMMA::ScaleOut::Zero;
+
+    tmem_allocator.allocate(TmemAllocator::Sm100TmemCapacityColumns, &shared_storage.tmem_base_ptr);
+    __syncwarp();
+    tmem_allocation_result_barrier.arrive();
+    uint32_t tmem_base_ptr = shared_storage.tmem_base_ptr;
+    bulk_tmem_mma.data() = tmem_base_ptr;
+
+    do {
+      uint32_t skip_wait = K_TILE_MAX <= 0;
+      auto barrier_token = mainloop_pipeline.consumer_try_wait(mainloop_pipe_consumer_state, skip_wait);
+      CUTE_NO_UNROLL
+      for (int k_tile = 0; k_tile < K_TILE_MAX && k_tile + tile_idx_n < tiles_in_n; )
+      {
+        mainloop_pipeline.consumer_wait(mainloop_pipe_consumer_state, barrier_token);
+        int read_stage = mainloop_pipe_consumer_state.index();
+        auto tCrA_mk = tCrA(_,_,_,read_stage);
+        auto tCrB_nk = tCrB(_,_,0,0);
+        CUTE_UNROLL
+        for (int k_block = 0; k_block < size<2>(tCrA) / 4; ++k_block)
+        {
+          accumulator_pipeline.producer_acquire(accumulator_pipe_producer_state);
+          CUTE_UNROLL
+          for (int i = 0; i < 4; i++) {
+            auto accumulators = bulk_tmem_mma(_,_,_,accumulator_pipe_producer_state.index() * 4 + i);
+            gemm(mma, tCrA_mk(_,_,k_block * 4 + i), tCrB_nk, accumulators);
+          }
+
+          accumulator_pipeline.producer_commit(accumulator_pipe_producer_state);
+          ++accumulator_pipe_producer_state;
+        }
+        auto curr_mainloop_pipe_consumer_state = mainloop_pipe_consumer_state;
+        ++mainloop_pipe_consumer_state;
+        ++k_tile;
+        skip_wait = k_tile >= K_TILE_MAX;
+        barrier_token = mainloop_pipeline.consumer_try_wait(mainloop_pipe_consumer_state, skip_wait);
+        mainloop_pipeline.consumer_release(curr_mainloop_pipe_consumer_state);
+      }
+
+      linear_tile_idx += gridDim.x;
+      tile_idx_m = linear_tile_idx % tiles_in_m;
+      tile_idx_n = (linear_tile_idx / tiles_in_m) * K_TILE_MAX;
+    } while (tile_idx_m < tiles_in_m && tile_idx_n < tiles_in_n);
+    tmem_allocator.release_allocation_lock();
+    accumulator_pipeline.producer_tail(accumulator_pipe_producer_state);
+    tmem_allocator.free(tmem_base_ptr, TmemAllocator::Sm100TmemCapacityColumns);
+  }
 }
 
 int main() {
@@ -459,7 +506,7 @@ int main() {
     using TC = cutlass::float_e2m1_t;
     using TSFC = cutlass::float_ue4m3_t;
 
-    int k_tile_size = 64; //2048;
+    int k_tile_size = 2048; // 2048 // 64 = 32
 
     constexpr int m = 128;   // 768;   // N
     constexpr int n = 64;  // 1024;  // M
