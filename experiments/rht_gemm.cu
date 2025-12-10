@@ -80,11 +80,14 @@ struct SharedStorage {
         "\n ------------------------------------------------------------- " \
         "\n");
 
-#define PRINT_ONE_THREAD(print_statements) \
+#define PRINT_ONE_WARP(print_statements) \
     if (elect_one_sync()) {                \
         print_statements                   \
     }
-
+#define PRINT_ONE_WARPGROUP(print_statements) \
+    if (threadIdx.x % 128 == 0) {                \
+        print_statements                   \
+    }
 template <class MShape, class NShape, class KShape, class ClusterTileShape,
           class TA, class AStride, class ASmemLayout, class TmaLoadA, class TB,
           class BStride, class BSmemLayout, class TmaLoadB, class TC_,
@@ -487,7 +490,7 @@ __global__ static void rht_gemm_device(
         uint32_t tmem_base_ptr = shared_storage.tmem_base_ptr;
         bulk_tmem_mma.data() = tmem_base_ptr;
 
-        PRINT_ONE_THREAD(PRINT_DELIMITER;
+        PRINT_ONE_WARP(PRINT_DELIMITER;
                          printf("Mma warp finished allocating TMEM!!!\n");)
 
         do {
@@ -555,7 +558,7 @@ __global__ static void rht_gemm_device(
                             AccumulatorPipelineState::Stages);
                     }
 #endif
-                    PRINT_ONE_THREAD(
+                    PRINT_ONE_WARP(
                         printf(
                             "Mma warp acquiring accumulator pipeline stage: %d\n", accumulator_pipe_producer_state.index()););
                     accumulator_pipeline.producer_acquire(
@@ -570,7 +573,7 @@ __global__ static void rht_gemm_device(
                     }
                     // Issues a umma_arrive (commit)
                     // tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64
-                    PRINT_ONE_THREAD(
+                    PRINT_ONE_WARP(
                         printf("Committing mma for k_block k_tile, stage: %d, %d, %d\n",
                                k_block, k_tile, accumulator_pipe_producer_state.index());
                         PRINT_DELIMITER)
@@ -607,7 +610,7 @@ __global__ static void rht_gemm_device(
         static constexpr int FragmentSize = 256 / sizeof_bits_v<TC>;
 
         // this is a barrier.sync
-        PRINT_ONE_THREAD(PRINT_DELIMITER; printf(
+        PRINT_ONE_WARPGROUP(PRINT_DELIMITER; printf(
                              "EPILOGUE_WARP::Arrived and waiting on TMEM\n"););
 
         tmem_allocation_result_barrier.arrive_and_wait();
@@ -650,7 +653,7 @@ __global__ static void rht_gemm_device(
                 Tensor tCgSFC_mn =
                     gSFC_mn(_, _, tile_idx_m, tile_idx_n + k_tile);
 
-                if (elect_one_sync()) {
+                if (thread_idx == 0) {
                     PRINT_DELIMITER;
                     printf("EPILOGUE_WARPS:Awaiting on accumulator pipe: %d\n", accumulator_pipe_consumer_state.index());
                     printf(
@@ -710,7 +713,7 @@ __global__ static void rht_gemm_device(
                 copy(tiled_t2r, tDtC, tTR_rAcc);
                 cutlass::arch::fence_view_async_tmem_load();
 
-                PRINT_ONE_THREAD(
+                PRINT_ONE_WARPGROUP(
                     printf(
                         "EPILOGUE_WARPS Releasing accumulator pipeline: %d\n",
                         accumulator_pipe_consumer_state.index());
