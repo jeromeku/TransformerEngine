@@ -285,6 +285,11 @@ __global__ static void rht_gemm_device(
         print_cute("tBgB", tBgB);
         print_cute("tBsB", tBgB);
         print_cute("AtomThrShapeMNK", AtomThrShapeMNK{});
+        auto tAgA_mk = tAgA(_, 0, _);
+        PRINT_DELIMITER
+        print_cute("DMA_WARP::Loading_tAgA_mk(_,k_tile_idx_n)",
+                    tAgA_mk(_, 0));
+        print_cute("DMA_WARP::Loading_tAsA(_,write_stage)", tAsA(_, 0));
     }
 
     uint16_t tma_mcast_mask_a =
@@ -366,13 +371,6 @@ __global__ static void rht_gemm_device(
         cute::wait_barrier(shared_storage.tma_barrier[0], 0 /*tma_phase_bit*/);
 
         // #if defined(PRINT_DMA)
-        // if (elect_one_sync()) {
-        //     auto tAgA_mk = tAgA(_, 0, _);
-        //     PRINT_DELIMITER
-        //     print_cute("DMA_WARP::Loading_tAgA_mk(_,k_tile_idx_n)",
-        //                tAgA_mk(_, 0));
-        //     print_cute("DMA_WARP::Loading_tAsA(_,write_stage)", tAsA(_, 0));
-        // }
         // #endif
 
         do {
