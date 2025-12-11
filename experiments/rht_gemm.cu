@@ -81,12 +81,12 @@ struct SharedStorage {
         "\n");
 
 #define PRINT_ONE_WARP(print_statements) \
-    if (elect_one_sync()) {                \
-        print_statements                   \
+    if (elect_one_sync()) {              \
+        print_statements                 \
     }
 #define PRINT_ONE_WARPGROUP(print_statements) \
-    if (threadIdx.x % 128 == 0) {                \
-        print_statements                   \
+    if (threadIdx.x % 128 == 0) {             \
+        print_statements                      \
     }
 template <class MShape, class NShape, class KShape, class ClusterTileShape,
           class TA, class AStride, class ASmemLayout, class TmaLoadA, class TB,
@@ -424,7 +424,8 @@ __global__ static void rht_gemm_device(
 
                 if (elect_one_sync()) {
                     printf(
-                        "DMA_WARP::Acquired mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, "
+                        "DMA_WARP::Acquired mainloop pipeline at (tile_m, "
+                        "tile_n, k_tile), (stage, phase, "
                         "count): (%d, %d, %d), (%d, %d, %d)\n",
                         tile_idx_m, tile_idx_n, k_tile,
                         mainloop_pipe_producer_state.index(),
@@ -490,7 +491,7 @@ __global__ static void rht_gemm_device(
         bulk_tmem_mma.data() = tmem_base_ptr;
 
         PRINT_ONE_WARP(PRINT_DELIMITER;
-                         printf("MMA_WARP:: Finished allocating TMem\n");)
+                       printf("MMA_WARP:: Finished allocating TMem\n");)
 
         do {
             uint32_t skip_wait = K_TILE_MAX <= 0;
@@ -500,7 +501,7 @@ __global__ static void rht_gemm_device(
             CUTE_NO_UNROLL
             for (int k_tile = 0;
                  k_tile < K_TILE_MAX && k_tile + tile_idx_n < tiles_in_n;) {
-                #if defined(DEBUG_MMA)
+                // #if defined(DEBUG_MMA)
                 if (elect_one_sync()) {
                     PRINT_DELIMITER
                     printf("MMA_WARP:Awaiting mainloop pipeline\n");
@@ -509,28 +510,33 @@ __global__ static void rht_gemm_device(
                         ": %d, %d, %d, %d\n",
                         tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX);
                 }
-                #endif
-
+                // #endif
+                if (elect_one_sync()) {
+                    printf(
+                        "MMA_WARP::Awaiting mainloop pipeline at (tile_m, "
+                        "tile_n, k_tile), (stage, phase, "
+                        "count): (%d, %d, %d), (%d, %d, %d)\n",
+                        tile_idx_m, tile_idx_n, k_tile,
+                        mainloop_pipe_consumer_state.index(),
+                        mainloop_pipe_consumer_state.phase(),
+                        mainloop_pipe_consumer_state.count());
+                }
                 mainloop_pipeline.consumer_wait(mainloop_pipe_consumer_state,
                                                 barrier_token);
                 int read_stage = mainloop_pipe_consumer_state.index();
                 auto tCrA_mk = tCrA(_, _, _, read_stage);
                 auto tCrB_nk = tCrB(_, _, 0, 0);
-
 #if defined(DEBUG_MMA)
+
                 if (elect_one_sync()) {
-                    PRINT_DELIMITER
-                    printf(
-                        "Mma warp MainloopPipe CONSUMER stage, "
-                        "phase, count: %d %d %d %d\n",
-                        mainloop_pipe_consumer_state.index(),
-                        mainloop_pipe_consumer_state.phase(),
-                        mainloop_pipe_consumer_state.count(),
-                        MainloopPipelineState::Stages);
-                    printf(
-                        "MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX"
-                        ": %d, %d, %d, %d\n",
-                        tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX);
+                    // printf(
+                    // "MMA_WARP::Acquired mainloop pipeline at (tile_m, tile_n,
+                    // k_tile), (stage, phase, " "count): (%d, %d, %d), (%d, %d,
+                    // %d)\n", tile_idx_m, tile_idx_n, k_tile,
+                    // mainloop_pipe_consumer_state.index(),
+                    // mainloop_pipe_consumer_state.phase(),
+                    // mainloop_pipe_consumer_state.count());
+
                     print_cute("tCrA_mk", tCrA_mk);
                     print_cute("tCrB_nk", tCrB_nk);
                     print_cute("tCrA_mk(_, _, k_block * 4 + i) layout",
@@ -558,8 +564,9 @@ __global__ static void rht_gemm_device(
                     }
 #endif
                     PRINT_ONE_WARP(
-                        printf(
-                            "MMA_WARP:: Acquiring accumulator pipeline stage: %d\n", accumulator_pipe_producer_state.index()););
+                        printf("MMA_WARP:: Acquiring accumulator pipeline "
+                               "stage: %d\n",
+                               accumulator_pipe_producer_state.index()););
                     accumulator_pipeline.producer_acquire(
                         accumulator_pipe_producer_state);
                     CUTE_UNROLL
@@ -572,9 +579,12 @@ __global__ static void rht_gemm_device(
                     }
                     // Issues a umma_arrive (commit)
                     // tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64
+                    // https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen-async-sync-operations-commit
                     PRINT_ONE_WARP(
-                        printf("MMA_WARP::Committing mma for k_block k_tile, stage: %d, %d, %d\n",
-                               k_block, k_tile, accumulator_pipe_producer_state.index());
+                        printf("MMA_WARP::Committing mma for k_block k_tile, "
+                               "stage: %d, %d, %d\n",
+                               k_block, k_tile,
+                               accumulator_pipe_producer_state.index());
                         PRINT_DELIMITER)
 
                     accumulator_pipeline.producer_commit(
@@ -587,8 +597,15 @@ __global__ static void rht_gemm_device(
                 ++mainloop_pipe_consumer_state;
                 ++k_tile;
                 skip_wait = k_tile >= K_TILE_MAX;
+                PRINT_ONE_WARP(
+                    printf("MMA_WARP::Awaiting mainloop pipeline stage: %d\n",
+                           mainloop_pipe_consumer_state.index());)
+
                 barrier_token = mainloop_pipeline.consumer_try_wait(
                     mainloop_pipe_consumer_state, skip_wait);
+                PRINT_ONE_WARP(
+                    printf("MMA_WARP::Releasing mainloop pipeline stage: %d\n",
+                           curr_mainloop_pipe_consumer_state.index());)
                 mainloop_pipeline.consumer_release(
                     curr_mainloop_pipe_consumer_state);
             }
@@ -609,8 +626,9 @@ __global__ static void rht_gemm_device(
         static constexpr int FragmentSize = 256 / sizeof_bits_v<TC>;
 
         // this is a barrier.sync
-        PRINT_ONE_WARPGROUP(PRINT_DELIMITER; printf(
-                             "EPILOGUE_WARP::Arrived and waiting on TMEM\n"););
+        PRINT_ONE_WARPGROUP(
+            PRINT_DELIMITER;
+            printf("EPILOGUE_WARP::Arrived and waiting on TMEM\n"););
 
         tmem_allocation_result_barrier.arrive_and_wait();
         uint32_t tmem_base_ptr = shared_storage.tmem_base_ptr;
@@ -654,18 +672,22 @@ __global__ static void rht_gemm_device(
 
                 if (thread_idx == 0) {
                     PRINT_DELIMITER;
-                    printf("EPILOGUE_WARPS:Awaiting on accumulator pipe: %d\n", accumulator_pipe_consumer_state.index());
                     printf(
-                        "EPILOGUE_WARPS::tile_idx_m, tile_idx_n, k_tile, "
+                        "EPILOGUE_WARPS:: Awaiting on accumulator pipe for "
+                        "(tile_idx_m, tile_idx_n, k_tile), (stage, phase, "
+                        "count) "
                         "K_TILE_MAX"
-                        ": %d, %d, %d, %d\n",
-                        tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX);
-                    #if defined(DEBUG_EPILOGUE)
+                        ": (%d, %d, %d), (%d, %d, %d)\n",
+                        tile_idx_m, tile_idx_n, k_tile,
+                        accumulator_pipe_consumer_state.index(),
+                        accumulator_pipe_consumer_state.phase(),
+                        accumulator_pipe_consumer_state.count());
+#if defined(DEBUG_EPILOGUE)
                     print_cute("tCgC", tCgC);
                     print_cute("tCgC_mn", tCgC_mn);
                     print_cute("gSFC_mn", gSFC_mn);
                     print_cute("tCgSFC_mn", tCgSFC_mn);
-                    #endif
+#endif
                 }
 
                 accumulator_pipeline.consumer_wait(
@@ -714,9 +736,17 @@ __global__ static void rht_gemm_device(
 
                 PRINT_ONE_WARPGROUP(
                     printf(
-                        "EPILOGUE_WARPS Releasing accumulator pipeline: %d\n",
-                        accumulator_pipe_consumer_state.index());
-                    PRINT_DELIMITER)
+                        "EPILOGUE_WARPS:: Awaiting on accumulator pipe for "
+                        "(tile_idx_m, tile_idx_n, k_tile), (stage, phase, "
+                        "count) "
+                        "K_TILE_MAX"
+                        ": (%d, %d, %d), (%d, %d, %d)\n",
+                        tile_idx_m, tile_idx_n, k_tile,
+                        accumulator_pipe_consumer_state.index(),
+                        accumulator_pipe_consumer_state.phase(),
+                        accumulator_pipe_consumer_state.count());
+                    PRINT_DELIMITER);
+                    
                 accumulator_pipeline.consumer_release(
                     accumulator_pipe_consumer_state);
 
