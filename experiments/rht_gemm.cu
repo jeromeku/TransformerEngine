@@ -784,7 +784,7 @@ The scope of the arrive-on operation is the cluster scope.
 
                     print_cute("EPILOGUE_WARP::tDgSFC", tDgSFC);
                     print_cute("EPILOGUE_WARP::tDrSFC", tDrSFC);
-                    print_cute("EPILOGUE_WARP::NUMVECS", NUMVECS);
+                    print_cute("EPILOGUE_WARP::NUMVECS", NumVecs);
                     print_cute("EPILOGUE_WARP::tC_rRowSFD_frg", tC_rRowSFD_frg);
 
                 }
