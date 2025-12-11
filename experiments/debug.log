@@ -42,9 +42,9 @@ Sw<3,4,3> o smem_ptr[16b](unset) o (((_64,_2),(_8,_2)),_1,_4,(_1,_13)):(((_1,_51
 sB
 Sw<1,4,3> o smem_ptr[16b](unset) o ((_16,_16),_1,_1,(_1,_13)):((_1,_16),_0,_0,(_0,_256))
 gA_mk
-gmem_ptr[16b](0xe1b23000000) o (_128,_64,1,6):(_1,128,_128,8192)
+gmem_ptr[16b](0x9f465000000) o (_128,_64,1,6):(_1,128,_128,8192)
 gB_nk
-gmem_ptr[16b](0xe1b23018000) o (_16,_16,1,1):(_1,16,_16,256)
+gmem_ptr[16b](0x9f465018000) o (_16,_16,1,1):(_1,16,_16,256)
 
  ------------------------------------------------------------- 
 mA
@@ -52,7 +52,7 @@ ArithTuple(_0,_0) o (128,384):(_1@0,_1@1)
 mB
 ArithTuple(_0,_0) o (16,16):(_1@0,_1@1)
 mC
-subptr[4b](0xe1b23018200.0) o (128,384):(64,_1)
+subptr[4b](0x9f465018200.0) o (128,384):(64,_1)
 sfc_layout
 (128,((_16,_4),6)):(24,((_0,_1),_4))
 
@@ -70,13 +70,13 @@ ArithTuple(_0,_0) o (_128,_64,1,6):(_1@0,_1@1,_128@0,_64@1)
 gB_nk
 ArithTuple(_0,_0) o (_16,_16,1,1):(_1@0,_1@1,_16@0,_16@1)
 gC_mn
-subptr[4b](0xe1b23018200.0) o (_128,_64,1,6):(64,_1,8192,_64)
+subptr[4b](0x9f465018200.0) o (_128,_64,1,6):(64,_1,8192,_64)
 gSFC_mn
-gmem_ptr[8b](0xe1b23024200) o (_128,(_16,_4),1,6):(24,(_0,_1),3072,_4)
+gmem_ptr[8b](0x9f465024200) o (_128,(_16,_4),1,6):(24,(_0,_1),3072,_4)
 tCsA
-Sw<3,4,3>_smem_ptr[16b](0xe1c00000580) o (((_64,_2),(_8,_2)),_1,_4,(_1,_13)):(((_1,_512),(_64,_1024)),_0,_2048,(_0,_8192))
+Sw<3,4,3>_smem_ptr[16b](0x9f500000580) o (((_64,_2),(_8,_2)),_1,_4,(_1,_13)):(((_1,_512),(_64,_1024)),_0,_2048,(_0,_8192))
 tCsB
-Sw<1,4,3>_smem_ptr[16b](0xe1c00034580) o ((_16,_16),_1,_1,(_1,_13)):((_1,_16),_0,_0,(_0,_256))
+Sw<1,4,3>_smem_ptr[16b](0x9f500034580) o ((_16,_16),_1,_1,(_1,_13)):((_1,_16),_0,_0,(_0,_256))
 
  ------------------------------------------------------------- 
 thr_mma
@@ -141,7 +141,7 @@ tmem_[32b](0x0000.0000) o ((_128,_64),_1,_1,_4):((_65536,_1),_0,_0,_64)
 tAgA
 ArithTuple(_0,_0) o (((_64,_8),(_2,_8)),1,6):(((_1@0,_1@1),(_64@0,_8@1)),_128@0,_64@1)
 tAsA
-Sw<3,4,3>_smem_ptr[16b](0xe1c00000580) o ((_512,_16),(_1,_13)):((_1,_512),(_0,_8192))
+Sw<3,4,3>_smem_ptr[16b](0x9f500000580) o ((_512,_16),(_1,_13)):((_1,_512),(_0,_8192))
 tBgB
 ArithTuple(_0,_0) o (((_16,_16),_1),1,1):(((_1@0,_1@1),_0),_16@0,_16@1)
 tBsB
@@ -153,154 +153,56 @@ Initialize TMA Load B...
  ------------------------------------------------------------- 
 
  ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
+DMA_WARP::producer_tail
 MMA_WARP:: Finished allocating TMem
 EPILOGUE_WARP::Arrived and waiting on TMEM
-DMA_WARP::Loading_tAgA_mk(_,k_tile_idx_n)
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-ArithTupleMMA_WARP:Awaiting mainloop pipeline
-EPILOGUE_WARP::tCgC
-(MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 0, 6
-subptr[4b](0xe1b23018200.0)0 o MMA_WARP::Awaiting mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 0), (0, 0, 0)
-,(0()_ o 128(,(_(64_)64,,__18,)_,1(,_12,,6_)8:)()()64:,(_(1()_,1_@00,,__10@1,)8192,,(__6464)@0
-,EPILOGUE_WARP::tiled_t2r
-_TiledCopy
-8@1  Tiler_MN:       )()()_
-256DMA_WARP::Loading_tAsA(_,write_stage)
-,_Sw<3,4,3>32_)smem_:ptr[(16_b](0xe1c00000580)32 o ,(_(1_)512,,__116:)_)0:,(_(1_:1_,0_)512
-)  TiledLayout_TV: )(
-(DMA_WARP::Acquired mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 1), (0, 1, 0)
-_MMA_WARP::tCrA_mk
-DMA_WARP::Acquired mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 2), (1, 1, 1)
-32UMMA::DescriptorIterator,DMA_WARP::Acquired mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 3), (2, 1, 2)
- o _(DMA_WARP::Acquired mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 4), (3, 1, 3)
-4_)DMA_WARP::Acquired mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 5), (4, 1, 4)
-1,,DMA_WARP::Acquired mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 6), (5, 1, 5)
-(_DMA_WARP::producer_tail
-_164,,__432)):)(:_(0(,__00,,__1256)),
-(MMA_WARP::tCrB_nk
-_UMMA::DescriptorIterator4 o ,(__2561),)_
-1Copy_Atom
-)  ThrID:        :(__320:,__10
-)  ValLayoutSrc: 
-(MMA_WARP::tCrA_mk(_, _, k_block * 4 + i) layout
-_(32_,1_,2048_)1:)(:_(0_,0_,1_)0
-)  ValLayoutDst: 
-(MMA_WARP::decltype(size<0>(A))::value: 1
-_32MMA_WARP::decltype(size<0>(A))::value: 1
-,MMA_WARP::size<2>(tCrA) / 4: 1
-_MMA_WARP:: Awaiting accumulator pipeline stage: 0
-64MMA_WARP::Committing mma for k_block k_tile, stage: 0, 0, 0
-)
- ------------------------------------------------------------- 
-:MMA_WARP::Awaiting mainloop pipeline stage: 1
-(MMA_WARP::Releasing mainloop pipeline stage: 0
-_
- ------------------------------------------------------------- 
-64,MMA_WARP:Awaiting mainloop pipeline
-_MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 1, 6
-1MMA_WARP::Awaiting mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 1), (1, 0, 1)
-)MMA_WARP::tCrA_mk
-
-UMMA::DescriptorIterator  ValLayoutRef:  o ((__321,,__20481),:_(4_)0:,(__10),
-_  ValueType:    032,b
-_
-256EPILOGUE_WARP::tiled_r2g
-)TiledCopy
-
-  Tiler_MN:       MMA_WARP::tCrB_nk
-(UMMA::DescriptorIterator( o _(256_,1_,32_)1:)(:_(32_,0_,1_)0,)_
-1MMA_WARP::tCrA_mk(_, _, k_block * 4 + i) layout
-:(__01,,__11:)_:0()_
-0  TiledLayout_TV: ,(_(0_)32
-,MMA_WARP::decltype(size<0>(A))::value: 1
-_MMA_WARP::decltype(size<0>(A))::value: 1
-4MMA_WARP::size<2>(tCrA) / 4: 1
-),MMA_WARP:: Awaiting accumulator pipeline stage: 1
-(MMA_WARP::Committing mma for k_block k_tile, stage: 0, 1, 1
-_
- ------------------------------------------------------------- 
-64MMA_WARP::Awaiting mainloop pipeline stage: 2
-,MMA_WARP::Releasing mainloop pipeline stage: 1
-_
- ------------------------------------------------------------- 
-1MMA_WARP:Awaiting mainloop pipeline
-))MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 2, 6
-:MMA_WARP::Awaiting mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 2), (2, 0, 2)
-(MMA_WARP::tCrA_mk
-(UMMA::DescriptorIterator_ o 256(,__11,)_,1(,__44,)_:0()_)0
-,Copy_Atom
-_  ThrID:        0_,1_:256_)0
-
+MMA_WARP::tCrA_mk
+UMMA::DescriptorIterator o (_1,_1,_4):(_0,_0,_256)
 MMA_WARP::tCrB_nk
-  ValLayoutSrc: UMMA::DescriptorIterator( o _(1_,1_,64_)1:)(:_(0_,0_,1_)0
-)  ValLayoutDst: 
-(MMA_WARP::tCrA_mk(_, _, k_block * 4 + i) layout
-_(1_,1_,64_)1:)(:_(0_,0_,1_)0
-)  ValLayoutRef: 
-(MMA_WARP::decltype(size<0>(A))::value: 1
-_MMA_WARP::decltype(size<0>(A))::value: 1
-1MMA_WARP::size<2>(tCrA) / 4: 1
-,_MMA_WARP:: Awaiting accumulator pipeline stage: 2
-64MMA_WARP::Committing mma for k_block k_tile, stage: 0, 2, 2
-)
- ------------------------------------------------------------- 
-:MMA_WARP::Awaiting mainloop pipeline stage: 3
-(MMA_WARP::Releasing mainloop pipeline stage: 2
-_
- ------------------------------------------------------------- 
-0MMA_WARP:Awaiting mainloop pipeline
-,_MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 3, 6
-1MMA_WARP::Awaiting mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 3), (3, 0, 3)
-)MMA_WARP::tCrA_mk
-
-UMMA::DescriptorIterator  ValueType:     o 4(b
-_
-1EPILOGUE_WARP::thr_t2r
-,ThrCopy
-_  ThrIdx: 1,0_
-4TiledCopy
-)  Tiler_MN:       :(((__0256,,__032,)_:256()_
-32MMA_WARP::tCrB_nk
-,UMMA::DescriptorIterator_ o 1()_,1_,1_:1_)0:,(__10:,__00))
-
-  TiledLayout_TV: MMA_WARP::tCrA_mk(_, _, k_block * 4 + i) layout
-(((__132,,__14)):,((__064,,__032))
-):MMA_WARP::decltype(size<0>(A))::value: 1
-(MMA_WARP::decltype(size<0>(A))::value: 1
-(MMA_WARP::size<2>(tCrA) / 4: 1
-_MMA_WARP:: Awaiting accumulator pipeline stage: 3
-0MMA_WARP::Committing mma for k_block k_tile, stage: 0, 3, 3
-,
- ------------------------------------------------------------- 
-_1MMA_WARP::Awaiting mainloop pipeline stage: 4
-)MMA_WARP::Releasing mainloop pipeline stage: 3
-,
- ------------------------------------------------------------- 
-(MMA_WARP:Awaiting mainloop pipeline
-_MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 4, 6
-4MMA_WARP::Awaiting mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 4), (4, 0, 4)
-,_MMA_WARP::tCrA_mk
-256UMMA::DescriptorIterator) o )(
-_Copy_Atom
-1  ThrID:        ,__132,:__41)
-:  ValLayoutSrc: ((__032,,__02048,)_:256()_
-0MMA_WARP::tCrB_nk
-,UMMA::DescriptorIterator_ o 1()_
-1  ValLayoutDst: ,(__132),:_(64_)0:,(__064),
-_MMA_WARP::tCrA_mk(_, _, k_block * 4 + i) layout
-1)(
-_  ValLayoutRef: 1,(__132),:_(2048_)0:,(__00),
-_MMA_WARP::decltype(size<0>(A))::value: 1
-1)MMA_WARP::decltype(size<0>(A))::value: 1
-
+UMMA::DescriptorIterator o (_1,_1):(_0,_0)
+MMA_WARP::tCrA_mk(_, _, k_block * 4 + i) layout
+(_1,_1):(_0,_0)
+MMA_WARP::decltype(size<0>(A))::value: 1
+MMA_WARP::decltype(size<0>(A))::value: 1
 MMA_WARP::size<2>(tCrA) / 4: 1
-  ValueType:    MMA_WARP:: Awaiting accumulator pipeline stage: 0
-32b
+
+ ------------------------------------------------------------- 
+EPILOGUE_WARP::tCgC
+subptr[4b](0x9f465018200.0) o ((_128,_64),_1,_1,1,6):((64,_1),_0,_0,8192,_64)
+EPILOGUE_WARP::tiled_t2r
+TiledCopy
+  Tiler_MN:       ((_256,_32):(_32,_1),_1:_0,_1:_0)
+  TiledLayout_TV: ((_32,_4),(_64,_32)):((_0,_1),(_4,_256))
+Copy_Atom
+  ThrID:        _32:_1
+  ValLayoutSrc: (_32,_2048):(_0,_1)
+  ValLayoutDst: (_32,_64):(_64,_1)
+  ValLayoutRef: (_32,_2048):(_0,_1)
+  ValueType:    32b
+
+EPILOGUE_WARP::tiled_r2g
+TiledCopy
+  Tiler_MN:       ((_256,_32):(_32,_1),_1:_0,_1:_0)
+  TiledLayout_TV: ((_32,_4),(_64,_1)):((_256,_1),(_4,_0))
+Copy_Atom
+  ThrID:        _1:_0
+  ValLayoutSrc: (_1,_64):(_0,_1)
+  ValLayoutDst: (_1,_64):(_0,_1)
+  ValLayoutRef: (_1,_64):(_0,_1)
+  ValueType:    4b
+
+EPILOGUE_WARP::thr_t2r
+ThrCopy
+  ThrIdx: 0
+TiledCopy
+  Tiler_MN:       ((_256,_32):(_32,_1),_1:_0,_1:_0)
+  TiledLayout_TV: ((_32,_4),(_64,_32)):((_0,_1),(_4,_256))
+Copy_Atom
+  ThrID:        _32:_1
+  ValLayoutSrc: (_32,_2048):(_0,_1)
+  ValLayoutDst: (_32,_64):(_64,_1)
+  ValLayoutRef: (_32,_2048):(_0,_1)
+  ValueType:    32b
 
 EPILOGUE_WARP::tiled_r2g
 ThrCopy
@@ -316,100 +218,39 @@ Copy_Atom
   ValueType:    4b
 
 EPILOGUE_WARP::gSFC_mn
-gmem_ptr[8b](0xe1b23024200) o (_128,(_16,_4),1,6):(24,(_0,_1),3072,_4)
-
- ------------------------------------------------------------- 
-EPILOGUE_WARPS:: Awaiting on accumulator pipe for (tile_idx_m, tile_idx_n, k_tile), (stage, phase, count) K_TILE_MAX: (0, 0, 0), (0, 0, 0)
+gmem_ptr[8b](0x9f465024200) o (_128,(_16,_4),1,6):(24,(_0,_1),3072,_4)
 EPILOGUE_WARP::tCgC
-subptr[4b](0xe1b23018200.0) o ((_128,_64),_1,_1,1,6):((64,_1),_0,_0,8192,_64)
+subptr[4b](0x9f465018200.0) o ((_128,_64),_1,_1,1,6):((64,_1),_0,_0,8192,_64)
 EPILOGUE_WARP::tCgC_mn
-subptr[4b](0xe1b23018200.0) o ((_128,_64),_1,_1):((64,_1),_0,_0)
+subptr[4b](0x9f465018200.0) o ((_128,_64),_1,_1):((64,_1),_0,_0)
 EPILOGUE_WARP::gSFC_mn
-gmem_ptr[8b](0xe1b23024200) o (_128,(_16,_4),1,6):(24,(_0,_1),3072,_4)
+gmem_ptr[8b](0x9f465024200) o (_128,(_16,_4),1,6):(24,(_0,_1),3072,_4)
 EPILOGUE_WARP::tCgSFC_mn
-gmem_ptr[8b](0xe1b23024200) o (_128,(_16,_4)):(24,(_0,_1))
+gmem_ptr[8b](0x9f465024200) o (_128,(_16,_4)):(24,(_0,_1))
 EPILOGUE_WARP::tCtC
 tmem_[32b](0x0000.0000) o ((_128,_64),_1,_1):((_65536,_1),_0,_0)
 EPILOGUE_WARP::tDtC
 tmem_[32b](0x0000.0000) o (((_64,_32),_1),_1,_1,_1):(((_1,_65536),_0),_0,_0,_0)
 EPILOGUE_WARP::tCgC
-subptr[4b](0xe1b23018200.0) o ((_128,_64),_1,_1,1,6):((64,_1),_0,_0,8192,_64)
+subptr[4b](0x9f465018200.0) o ((_128,_64),_1,_1,1,6):((64,_1),_0,_0,8192,_64)
 EPILOGUE_WARP::tTR_rAcc
-ptr[32b](0xe1b41fffa10) o ((_64,_1),_1,_1,_1):((_1,_0),_0,_0,_0)
+ptr[32b](0x9f481fffa30) o ((_64,_1),_1,_1,_1):((_1,_0),_0,_0,_0)
 EPILOGUE_WARP::tTR_rAcc_frag
-ptr[2048b](0xe1b41fffb50) o _1:_1
+ptr[2048b](0x9f481fffb50) o _1:_1
 EPILOGUE_WARP::tDrC_frag
-ptr[256b](0xe1b41fffc50) o _1:_1
+ptr[256b](0x9f481fffc50) o _1:_1
 EPILOGUE_WARP::src
-subptr[4b](0xe1b41fffc50.0) o ((_64,_1),_1,_1,_1):((_1,_0),_0,_0,_0)
+subptr[4b](0x9f481fffc50.0) o ((_64,_1),_1,_1,_1):((_1,_0),_0,_0,_0)
 EPILOGUE_WARP::dst
-subptr[4b](0xe1b23018200.0) o ((_64,_1),_1,_1,_1):((_1,_0),_0,_0,_0)
+subptr[4b](0x9f465018200.0) o ((_64,_1),_1,_1,_1):((_1,_0),_0,_0,_0)
 EPILOGUE_WARP::tCgSFC
-gmem_ptr[8b](0xe1b23024200) o ((_128,(_16,_4)),_1,_1):((24,(_0,_1)),_0,_0)
+gmem_ptr[8b](0x9f465024200) o ((_128,(_16,_4)),_1,_1):((24,(_0,_1)),_0,_0)
 EPILOGUE_WARP::tDgSFC
-gmem_ptr[8b](0xe1b23024200) o _4:_1
+gmem_ptr[8b](0x9f465024200) o _4:_1
 EPILOGUE_WARP::tDrSFC
-ptr[8b](0xe1b41fffa10) o _4:_1
+ptr[8b](0x9f481fffa30) o _4:_1
 EPILOGUE_WARP::NUMVECS
 4
 EPILOGUE_WARP::tC_rRowSFD_frg
-ptr[32b](0xe1b41fffc70) o _1:_1
-EPILOGUE_WARPS:: Releasing accumulator pipe for (tile_idx_m, tile_idx_n, k_tile), (stage, phase, count) K_TILE_MAX: (0, 0, 0), (0, 0, 0)
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-MMA_WARP::Committing mma for k_block k_tile, stage: 0, 4, 0
-
- ------------------------------------------------------------- 
-EPILOGUE_WARPS:: Awaiting on accumulator pipe for (tile_idx_m, tile_idx_n, k_tile), (stage, phase, count) K_TILE_MAX: (0, 0, 1), (1, 0, 1)
-MMA_WARP::Awaiting mainloop pipeline stage: 5
-EPILOGUE_WARPS:: Releasing accumulator pipe for (tile_idx_m, tile_idx_n, k_tile), (stage, phase, count) K_TILE_MAX: (0, 0, 1), (1, 0, 1)
-MMA_WARP::Releasing mainloop pipeline stage: 4
-
- ------------------------------------------------------------- 
-
- ------------------------------------------------------------- 
-MMA_WARP:Awaiting mainloop pipeline
-
- ------------------------------------------------------------- 
-MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 5, 6
-EPILOGUE_WARPS:: Awaiting on accumulator pipe for (tile_idx_m, tile_idx_n, k_tile), (stage, phase, count) K_TILE_MAX: (0, 0, 2), (2, 0, 2)
-MMA_WARP::Awaiting mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 5), (5, 0, 5)
-EPILOGUE_WARPS:: Releasing accumulator pipe for (tile_idx_m, tile_idx_n, k_tile), (stage, phase, count) K_TILE_MAX: (0, 0, 2), (2, 0, 2)
-MMA_WARP::tCrA_mk
-
- ------------------------------------------------------------- 
-UMMA::DescriptorIterator
- ------------------------------------------------------------- 
- o (EPILOGUE_WARPS:: Awaiting on accumulator pipe for (tile_idx_m, tile_idx_n, k_tile), (stage, phase, count) K_TILE_MAX: (0, 0, 3), (3, 0, 3)
-_1EPILOGUE_WARPS:: Releasing accumulator pipe for (tile_idx_m, tile_idx_n, k_tile), (stage, phase, count) K_TILE_MAX: (0, 0, 3), (3, 0, 3)
-,
- ------------------------------------------------------------- 
-_
- ------------------------------------------------------------- 
-1,EPILOGUE_WARPS:: Awaiting on accumulator pipe for (tile_idx_m, tile_idx_n, k_tile), (stage, phase, count) K_TILE_MAX: (0, 0, 4), (0, 1, 4)
-_EPILOGUE_WARPS:: Releasing accumulator pipe for (tile_idx_m, tile_idx_n, k_tile), (stage, phase, count) K_TILE_MAX: (0, 0, 4), (0, 1, 4)
-4)
- ------------------------------------------------------------- 
-:
- ------------------------------------------------------------- 
-(_EPILOGUE_WARPS:: Awaiting on accumulator pipe for (tile_idx_m, tile_idx_n, k_tile), (stage, phase, count) K_TILE_MAX: (0, 0, 5), (1, 1, 5)
-0,_0,_256)
-MMA_WARP::tCrB_nk
-UMMA::DescriptorIterator o (_1,_1):(_0,_0)
-MMA_WARP::tCrA_mk(_, _, k_block * 4 + i) layout
-(_1,_1):(_0,_0)
-MMA_WARP::decltype(size<0>(A))::value: 1
-MMA_WARP::decltype(size<0>(A))::value: 1
-MMA_WARP::size<2>(tCrA) / 4: 1
-MMA_WARP:: Awaiting accumulator pipeline stage: 1
-MMA_WARP::Committing mma for k_block k_tile, stage: 0, 5, 1
-
- ------------------------------------------------------------- 
-MMA_WARP::Awaiting mainloop pipeline stage: 6
-EPILOGUE_WARPS:: Releasing accumulator pipe for (tile_idx_m, tile_idx_n, k_tile), (stage, phase, count) K_TILE_MAX: (0, 0, 5), (1, 1, 5)
-MMA_WARP::Releasing mainloop pipeline stage: 5
-
- ------------------------------------------------------------- 
+ptr[32b](0x9f481fffc70) o _1:_1
 MMA_WARP::releasing TMEM

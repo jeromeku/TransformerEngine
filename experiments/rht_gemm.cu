@@ -365,15 +365,15 @@ __global__ static void rht_gemm_device(
         }
         cute::wait_barrier(shared_storage.tma_barrier[0], 0 /*tma_phase_bit*/);
 
-// #if defined(PRINT_DMA)
-        if (elect_one_sync()) {
-            auto tAgA_mk = tAgA(_, 0, _);
-            PRINT_DELIMITER
-            print_cute("DMA_WARP::Loading_tAgA_mk(_,k_tile_idx_n)",
-                       tAgA_mk(_, 0));
-            print_cute("DMA_WARP::Loading_tAsA(_,write_stage)", tAsA(_, 0));
-        }
-// #endif
+        // #if defined(PRINT_DMA)
+        // if (elect_one_sync()) {
+        //     auto tAgA_mk = tAgA(_, 0, _);
+        //     PRINT_DELIMITER
+        //     print_cute("DMA_WARP::Loading_tAgA_mk(_,k_tile_idx_n)",
+        //                tAgA_mk(_, 0));
+        //     print_cute("DMA_WARP::Loading_tAsA(_,write_stage)", tAsA(_, 0));
+        // }
+        // #endif
 
         do {
             bool is_first_wave = linear_tile_idx == blockIdx.x;
@@ -422,16 +422,16 @@ __global__ static void rht_gemm_device(
                 using BarrierType =
                     typename MainloopPipeline::ProducerBarrierType;
 
-                if (elect_one_sync()) {
-                    printf(
-                        "DMA_WARP::Acquired mainloop pipeline at (tile_m, "
-                        "tile_n, k_tile), (stage, phase, "
-                        "count): (%d, %d, %d), (%d, %d, %d)\n",
-                        tile_idx_m, tile_idx_n, k_tile,
-                        mainloop_pipe_producer_state.index(),
-                        mainloop_pipe_producer_state.phase(),
-                        mainloop_pipe_producer_state.count());
-                }
+                // if (elect_one_sync()) {
+                //     printf(
+                //         "DMA_WARP::Acquired mainloop pipeline at (tile_m, "
+                //         "tile_n, k_tile), (stage, phase, "
+                //         "count): (%d, %d, %d), (%d, %d, %d)\n",
+                //         tile_idx_m, tile_idx_n, k_tile,
+                //         mainloop_pipe_producer_state.index(),
+                //         mainloop_pipe_producer_state.phase(),
+                //         mainloop_pipe_producer_state.count());
+                // }
 
                 BarrierType* tma_barrier =
                     mainloop_pipeline.producer_get_barrier(
@@ -490,9 +490,22 @@ __global__ static void rht_gemm_device(
         uint32_t tmem_base_ptr = shared_storage.tmem_base_ptr;
         bulk_tmem_mma.data() = tmem_base_ptr;
 
-        PRINT_ONE_WARP(PRINT_DELIMITER;
-                       printf("MMA_WARP:: Finished allocating TMem\n");)
-
+        if (elect_one_sync()) {
+            PRINT_DELIMITER;
+            printf("MMA_WARP:: Finished allocating TMem\n");
+            auto tCrA_mk = tCrA(_, _, _, 0);
+            auto tCrB_nk = tCrB(_, _, 0, 0);
+            print_cute("MMA_WARP::tCrA_mk", tCrA(_, _, _, 0));
+            print_cute("MMA_WARP::tCrB_nk", tCrB(_, _, 0, 0));
+            print_cute("MMA_WARP::tCrA_mk(_, _, k_block * 4 + i) layout",
+                       tCrA_mk(_, _, 0).layout());
+            auto A = tCrA_mk(_, _, 0);
+            printf("MMA_WARP::decltype(size<0>(A))::value: %d\n",
+                   decltype(size<0>(A))::value);
+            printf("MMA_WARP::decltype(size<0>(A))::value: %d\n",
+                   decltype(size<0>(tCrB_nk))::value);
+            printf("MMA_WARP::size<2>(tCrA) / 4: %d\n", size<2>(tCrA) / 4);
+        }
         do {
             uint32_t skip_wait = K_TILE_MAX <= 0;
             auto barrier_token = mainloop_pipeline.consumer_try_wait(
@@ -502,31 +515,31 @@ __global__ static void rht_gemm_device(
             for (int k_tile = 0;
                  k_tile < K_TILE_MAX && k_tile + tile_idx_n < tiles_in_n;) {
                 // #if defined(DEBUG_MMA)
-                if (elect_one_sync()) {
-                    PRINT_DELIMITER
-                    printf("MMA_WARP:Awaiting mainloop pipeline\n");
-                    printf(
-                        "MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX"
-                        ": %d, %d, %d, %d\n",
-                        tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX);
-                }
+                // if (elect_one_sync()) {
+                //     PRINT_DELIMITER
+                //     printf("MMA_WARP:Awaiting mainloop pipeline\n");
+                //     printf(
+                //         "MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX"
+                //         ": %d, %d, %d, %d\n",
+                //         tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX);
+                // }
                 // #endif
-                if (elect_one_sync()) {
-                    printf(
-                        "MMA_WARP::Awaiting mainloop pipeline at (tile_m, "
-                        "tile_n, k_tile), (stage, phase, "
-                        "count): (%d, %d, %d), (%d, %d, %d)\n",
-                        tile_idx_m, tile_idx_n, k_tile,
-                        mainloop_pipe_consumer_state.index(),
-                        mainloop_pipe_consumer_state.phase(),
-                        mainloop_pipe_consumer_state.count());
-                }
+                // if (elect_one_sync()) {
+                //     printf(
+                //         "MMA_WARP::Awaiting mainloop pipeline at (tile_m, "
+                //         "tile_n, k_tile), (stage, phase, "
+                //         "count): (%d, %d, %d), (%d, %d, %d)\n",
+                //         tile_idx_m, tile_idx_n, k_tile,
+                //         mainloop_pipe_consumer_state.index(),
+                //         mainloop_pipe_consumer_state.phase(),
+                //         mainloop_pipe_consumer_state.count());
+                // }
                 mainloop_pipeline.consumer_wait(mainloop_pipe_consumer_state,
                                                 barrier_token);
                 int read_stage = mainloop_pipe_consumer_state.index();
                 auto tCrA_mk = tCrA(_, _, _, read_stage);
                 auto tCrB_nk = tCrB(_, _, 0, 0);
-// #if defined(DEBUG_MMA)
+                // #if defined(DEBUG_MMA)
 
                 if (elect_one_sync()) {
                     // printf(
@@ -537,18 +550,20 @@ __global__ static void rht_gemm_device(
                     // mainloop_pipe_consumer_state.phase(),
                     // mainloop_pipe_consumer_state.count());
 
-                    print_cute("MMA_WARP::tCrA_mk", tCrA_mk);
-                    print_cute("MMA_WARP::tCrB_nk", tCrB_nk);
-                    print_cute("MMA_WARP::tCrA_mk(_, _, k_block * 4 + i) layout",
-                               tCrA_mk(_, _, 0).layout());
-                    auto A = tCrA_mk(_, _, 0);
-                    printf("MMA_WARP::decltype(size<0>(A))::value: %d\n",
-                           decltype(size<0>(A))::value);
-                    printf("MMA_WARP::decltype(size<0>(A))::value: %d\n",
-                           decltype(size<0>(tCrB_nk))::value);
-                    printf("MMA_WARP::size<2>(tCrA) / 4: %d\n", size<2>(tCrA) / 4);
+                    // print_cute("MMA_WARP::tCrA_mk", tCrA_mk);
+                    // print_cute("MMA_WARP::tCrB_nk", tCrB_nk);
+                    // print_cute(
+                    //     "MMA_WARP::tCrA_mk(_, _, k_block * 4 + i) layout",
+                    //     tCrA_mk(_, _, 0).layout());
+                    // auto A = tCrA_mk(_, _, 0);
+                    // printf("MMA_WARP::decltype(size<0>(A))::value: %d\n",
+                    //        decltype(size<0>(A))::value);
+                    // printf("MMA_WARP::decltype(size<0>(A))::value: %d\n",
+                    //        decltype(size<0>(tCrB_nk))::value);
+                    // printf("MMA_WARP::size<2>(tCrA) / 4: %d\n",
+                    //        size<2>(tCrA) / 4);
                 }
-// #endif
+                // #endif
                 CUTE_UNROLL
                 for (int k_block = 0; k_block < size<2>(tCrA) / 4; ++k_block) {
 #if defined(DEBUG_MMA)
@@ -563,10 +578,10 @@ __global__ static void rht_gemm_device(
                             AccumulatorPipelineState::Stages);
                     }
 #endif
-                    PRINT_ONE_WARP(
-                        printf("MMA_WARP:: Awaiting accumulator pipeline "
-                               "stage: %d\n",
-                               accumulator_pipe_producer_state.index()););
+                    // PRINT_ONE_WARP(
+                    //     printf("MMA_WARP:: Awaiting accumulator pipeline "
+                    //            "stage: %d\n",
+                    //            accumulator_pipe_producer_state.index()););
                     /*  CUTLASS_DEVICE
   void producer_acquire(uint32_t stage, uint32_t phase, ProducerToken
   barrier_token) { detail::pipeline_check_is_producer(params_.role); if
@@ -588,12 +603,12 @@ __global__ static void rht_gemm_device(
                     // Issues a umma_arrive (commit)
                     // tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64
                     // https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen-async-sync-operations-commit
-                    PRINT_ONE_WARP(
-                        printf("MMA_WARP::Committing mma for k_block k_tile, "
-                               "stage: %d, %d, %d\n",
-                               k_block, k_tile,
-                               accumulator_pipe_producer_state.index());
-                        PRINT_DELIMITER)
+                    // PRINT_ONE_WARP(
+                    //     printf("MMA_WARP::Committing mma for k_block k_tile, "
+                    //            "stage: %d, %d, %d\n",
+                    //            k_block, k_tile,
+                    //            accumulator_pipe_producer_state.index());
+                    //     PRINT_DELIMITER)
 
                     accumulator_pipeline.producer_commit(
                         accumulator_pipe_producer_state);
@@ -605,49 +620,54 @@ __global__ static void rht_gemm_device(
                 ++mainloop_pipe_consumer_state;
                 ++k_tile;
                 skip_wait = k_tile >= K_TILE_MAX;
-                PRINT_ONE_WARP(
-                    printf("MMA_WARP::Awaiting mainloop pipeline stage: %d\n",
-                           mainloop_pipe_consumer_state.index());)
-/*
-  ConsumerToken consumer_try_wait(uint32_t stage, uint32_t phase, uint32_t skip_wait) {
-    detail::pipeline_check_is_consumer(params_.role);
-    if (skip_wait) {
-      return {BarrierStatus::WaitDone};
-    }
-    bool barrier_status = full_barrier_ptr_[stage].try_wait(phase);
-    return {static_cast<BarrierStatus>(barrier_status)};
-  }
+                // PRINT_ONE_WARP(
+                //     printf("MMA_WARP::Awaiting mainloop pipeline stage: %d\n",
+                //            mainloop_pipe_consumer_state.index());)
+                /*
+                  ConsumerToken consumer_try_wait(uint32_t stage, uint32_t
+                  phase, uint32_t skip_wait) {
+                    detail::pipeline_check_is_consumer(params_.role);
+                    if (skip_wait) {
+                      return {BarrierStatus::WaitDone};
+                    }
+                    bool barrier_status =
+                  full_barrier_ptr_[stage].try_wait(phase); return
+                  {static_cast<BarrierStatus>(barrier_status)};
+                  }
 
-*/
+                */
                 barrier_token = mainloop_pipeline.consumer_try_wait(
                     mainloop_pipe_consumer_state, skip_wait);
-                PRINT_ONE_WARP(
-                    printf("MMA_WARP::Releasing mainloop pipeline stage: %d\n",
-                           curr_mainloop_pipe_consumer_state.index());)
-    /*
-      CUTLASS_DEVICE
-  void consumer_release(uint32_t stage, uint32_t skip) {
-    detail::pipeline_check_is_consumer(params_.role);
-    uint64_t* smem_ptr = reinterpret_cast<uint64_t*>(&empty_barrier_ptr_[stage]);
-    ...
-    if (!skip) {
-        if constexpr (cute::is_static_v<ClusterShape> and size(ClusterShape{}) == 1) {
-          cutlass::arch::umma_arrive(smem_ptr);
-        }
-        else {
-          cutlass::arch::umma_arrive_multicast(smem_ptr, block_id_mask_);
-        }
-      }
-    }
-  }
-};
+                // PRINT_ONE_WARP(
+                //     printf("MMA_WARP::Releasing mainloop pipeline stage: %d\n",
+                //            curr_mainloop_pipe_consumer_state.index());)
+                /*
+                  CUTLASS_DEVICE
+              void consumer_release(uint32_t stage, uint32_t skip) {
+                detail::pipeline_check_is_consumer(params_.role);
+                uint64_t* smem_ptr =
+            reinterpret_cast<uint64_t*>(&empty_barrier_ptr_[stage]);
+                ...
+                if (!skip) {
+                    if constexpr (cute::is_static_v<ClusterShape> and
+            size(ClusterShape{}) == 1) { cutlass::arch::umma_arrive(smem_ptr);
+                    }
+                    else {
+                      cutlass::arch::umma_arrive_multicast(smem_ptr,
+            block_id_mask_);
+                    }
+                  }
+                }
+              }
+            };
 
-The qualifier .mbarrier::arrive::one indicates that upon the completion of the 
-prior asynchronous tcgen05 operation issued by the current thread, 
-an arrive-on operation, with the count argument of 1, is signaled on the mbarrier object. 
-The scope of the arrive-on operation is the cluster scope.
-    */
-            mainloop_pipeline.consumer_release(
+            The qualifier .mbarrier::arrive::one indicates that upon the
+            completion of the prior asynchronous tcgen05 operation issued by the
+            current thread, an arrive-on operation, with the count argument of
+            1, is signaled on the mbarrier object. The scope of the arrive-on
+            operation is the cluster scope.
+                */
+                mainloop_pipeline.consumer_release(
                     curr_mainloop_pipe_consumer_state);
             }
 
@@ -684,17 +704,6 @@ The scope of the arrive-on operation is the cluster scope.
             Copy_Atom<SM100_STORE_256bit_CACHE_NOALLOCATION, TC>{}, tiled_t2r);
         auto thr_t2r = tiled_t2r.get_slice(thread_idx);
         auto thr_r2g = tiled_r2g.get_slice(thread_idx);
-// #if defined(DEBUG_EPILOGUE)
-        if (thread_idx == 0) {
-            PRINT_DELIMITER;
-            print_cute("EPILOGUE_WARP::tCgC", tCgC);
-            print_cute("EPILOGUE_WARP::tiled_t2r", tiled_t2r);
-            print_cute("EPILOGUE_WARP::tiled_r2g", tiled_r2g);
-            print_cute("EPILOGUE_WARP::thr_t2r", thr_t2r);
-            print_cute("EPILOGUE_WARP::tiled_r2g", thr_r2g);
-            print_cute("EPILOGUE_WARP::gSFC_mn", gSFC_mn);
-        }
-// #endif
         // NVFP4 non-E8 recipe constants and global scales
         static constexpr float fp4_max = 6.0f;
 
@@ -712,27 +721,27 @@ The scope of the arrive-on operation is the cluster scope.
                 Tensor tCgSFC_mn =
                     gSFC_mn(_, _, tile_idx_m, tile_idx_n + k_tile);
 
-                if (thread_idx == 0) {
-                    PRINT_DELIMITER;
-                    printf(
-                        "EPILOGUE_WARPS:: Awaiting on accumulator pipe for "
-                        "(tile_idx_m, tile_idx_n, k_tile), (stage, phase, "
-                        "count) "
-                        "K_TILE_MAX"
-                        ": (%d, %d, %d), (%d, %d, %d)\n",
-                        tile_idx_m, tile_idx_n, k_tile,
-                        accumulator_pipe_consumer_state.index(),
-                        accumulator_pipe_consumer_state.phase(),
-                        accumulator_pipe_consumer_state.count());
-#if defined(DEBUG_EPILOGUE)
-                    print_cute("tCgC", tCgC);
-                    print_cute("tCgC_mn", tCgC_mn);
-                    print_cute("gSFC_mn", gSFC_mn);
-                    print_cute("tCgSFC_mn", tCgSFC_mn);
-#endif
-                }
+//                 if (thread_idx == 0) {
+//                     PRINT_DELIMITER;
+//                     printf(
+//                         "EPILOGUE_WARPS:: Awaiting on accumulator pipe for "
+//                         "(tile_idx_m, tile_idx_n, k_tile), (stage, phase, "
+//                         "count) "
+//                         "K_TILE_MAX"
+//                         ": (%d, %d, %d), (%d, %d, %d)\n",
+//                         tile_idx_m, tile_idx_n, k_tile,
+//                         accumulator_pipe_consumer_state.index(),
+//                         accumulator_pipe_consumer_state.phase(),
+//                         accumulator_pipe_consumer_state.count());
+// #if defined(DEBUG_EPILOGUE)
+//                     print_cute("tCgC", tCgC);
+//                     print_cute("tCgC_mn", tCgC_mn);
+//                     print_cute("gSFC_mn", gSFC_mn);
+//                     print_cute("tCgSFC_mn", tCgSFC_mn);
+// #endif
+//                 }
 
-                // Blocking wait on full_barrier (ClusterBarrier) 
+                // Blocking wait on full_barrier (ClusterBarrier)
                 accumulator_pipeline.consumer_wait(
                     accumulator_pipe_consumer_state);
 
@@ -742,7 +751,6 @@ The scope of the arrive-on operation is the cluster scope.
                     tCtC);  // ((TMEM_LOAD,#TMEM_LOAD),MMA_M,MMA_N)
                 Tensor tDgC = thr_t2r.partition_D(
                     tCgC_mn);  // ((TMEM_LOAD,#TMEM_LOAD),MMA_M,MMA_N)
-
 
                 Tensor tTR_rAcc = make_tensor<ElementAccumulator>(
                     shape(tDgC));  // ((TMEM_LOAD,#TMEM_LOAD),MMA_M,MMA_N)
@@ -769,7 +777,15 @@ The scope of the arrive-on operation is the cluster scope.
                 Tensor tC_rRowSFD_frg =
                     recast<cutlass::Array<TSFC, NumVecs>>(tDrSFC);
 
-                if(thread_idx == 0 && k_tile == 0){
+                if (thread_idx == 0 && k_tile == 0) {
+                    PRINT_DELIMITER;
+                    print_cute("EPILOGUE_WARP::tCgC", tCgC);
+                    print_cute("EPILOGUE_WARP::tiled_t2r", tiled_t2r);
+                    print_cute("EPILOGUE_WARP::tiled_r2g", tiled_r2g);
+                    print_cute("EPILOGUE_WARP::thr_t2r", thr_t2r);
+                    print_cute("EPILOGUE_WARP::tiled_r2g", thr_r2g);
+                    print_cute("EPILOGUE_WARP::gSFC_mn", gSFC_mn);
+
                     print_cute("EPILOGUE_WARP::tCgC", tCgC);
                     print_cute("EPILOGUE_WARP::tCgC_mn", tCgC_mn);
                     print_cute("EPILOGUE_WARP::gSFC_mn", gSFC_mn);
@@ -791,7 +807,6 @@ The scope of the arrive-on operation is the cluster scope.
                     print_cute("EPILOGUE_WARP::tDrSFC", tDrSFC);
                     print_cute("EPILOGUE_WARP::NUMVECS", NumVecs);
                     print_cute("EPILOGUE_WARP::tC_rRowSFD_frg", tC_rRowSFD_frg);
-
                 }
 
                 cutlass::maximum_absolute_value_reduction<
@@ -803,17 +818,17 @@ The scope of the arrive-on operation is the cluster scope.
                 copy(tiled_t2r, tDtC, tTR_rAcc);
                 cutlass::arch::fence_view_async_tmem_load();
 
-                PRINT_ONE_WARPGROUP(
-                    printf("EPILOGUE_WARPS:: Releasing accumulator pipe for "
-                           "(tile_idx_m, tile_idx_n, k_tile), (stage, phase, "
-                           "count) "
-                           "K_TILE_MAX"
-                           ": (%d, %d, %d), (%d, %d, %d)\n",
-                           tile_idx_m, tile_idx_n, k_tile,
-                           accumulator_pipe_consumer_state.index(),
-                           accumulator_pipe_consumer_state.phase(),
-                           accumulator_pipe_consumer_state.count());
-                    PRINT_DELIMITER);
+                // PRINT_ONE_WARPGROUP(
+                //     printf("EPILOGUE_WARPS:: Releasing accumulator pipe for "
+                //            "(tile_idx_m, tile_idx_n, k_tile), (stage, phase, "
+                //            "count) "
+                //            "K_TILE_MAX"
+                //            ": (%d, %d, %d), (%d, %d, %d)\n",
+                //            tile_idx_m, tile_idx_n, k_tile,
+                //            accumulator_pipe_consumer_state.index(),
+                //            accumulator_pipe_consumer_state.phase(),
+                //            accumulator_pipe_consumer_state.count());
+                //     PRINT_DELIMITER);
 
                 // Arrive on empty_barrier
                 accumulator_pipeline.consumer_release(
@@ -821,7 +836,7 @@ The scope of the arrive-on operation is the cluster scope.
 
                 ++accumulator_pipe_consumer_state;
 
-#if 0
+// #if 0
                 // Cast data from FP32 to BF16 to FP32.
                 auto convert_accum_to_bf16 = cutlass::NumericArrayConverter<
                     cutlass::bfloat16_t, ElementAccumulator, FragmentSize>{};
@@ -900,7 +915,7 @@ The scope of the arrive-on operation is the cluster scope.
 
                 copy(AutoVectorizingCopyWithAssumedAlignment<128>{}, tDrSFC,
                      tDgSFC);
-#endif
+//#endif
             }
             linear_tile_idx += gridDim.x;
             tile_idx_m = linear_tile_idx % tiles_in_m;
