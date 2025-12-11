@@ -685,7 +685,7 @@ The scope of the arrive-on operation is the cluster scope.
         auto thr_t2r = tiled_t2r.get_slice(thread_idx);
         auto thr_r2g = tiled_r2g.get_slice(thread_idx);
 // #if defined(DEBUG_EPILOGUE)
-        if (elect_one_sync()) {
+        if (thread_idx == 0) {
             PRINT_DELIMITER;
             print_cute("EPILOGUE_WARP::tCgC", tCgC);
             print_cute("EPILOGUE_WARP::tiled_t2r", tiled_t2r);
