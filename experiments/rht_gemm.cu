@@ -422,16 +422,15 @@ __global__ static void rht_gemm_device(
                 using BarrierType =
                     typename MainloopPipeline::ProducerBarrierType;
 
-#if defined(PRINT_DMA)
                 if (elect_one_sync()) {
                     printf(
-                        "Mainloop producer getting barrier for stage, phase, "
-                        "count: %d %d %d\n",
+                        "DMA_WARP::Acquired mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, "
+                        "count): (%d, %d, %d), (%d, %d, %d)\n",
+                        tile_idx_m, tile_idx_n, k_tile,
                         mainloop_pipe_producer_state.index(),
                         mainloop_pipe_producer_state.phase(),
                         mainloop_pipe_producer_state.count());
                 }
-#endif
 
                 BarrierType* tma_barrier =
                     mainloop_pipeline.producer_get_barrier(
@@ -469,7 +468,7 @@ __global__ static void rht_gemm_device(
         } while (tile_idx_m < tiles_in_m && tile_idx_n < tiles_in_n);
 
         if (elect_one_sync()) {
-            printf("DMA WARP EXITING!!!\n");
+            printf("DMA_WARP::producer_tail\n");
         }
         mainloop_pipeline.producer_tail(mainloop_pipe_producer_state);
     } else if (is_mma_warp) {
@@ -491,7 +490,7 @@ __global__ static void rht_gemm_device(
         bulk_tmem_mma.data() = tmem_base_ptr;
 
         PRINT_ONE_WARP(PRINT_DELIMITER;
-                         printf("Mma warp finished allocating TMEM!!!\n");)
+                         printf("MMA_WARP:: Finished allocating TMem\n");)
 
         do {
             uint32_t skip_wait = K_TILE_MAX <= 0;
@@ -560,7 +559,7 @@ __global__ static void rht_gemm_device(
 #endif
                     PRINT_ONE_WARP(
                         printf(
-                            "Mma warp acquiring accumulator pipeline stage: %d\n", accumulator_pipe_producer_state.index()););
+                            "MMA_WARP:: Acquiring accumulator pipeline stage: %d\n", accumulator_pipe_producer_state.index()););
                     accumulator_pipeline.producer_acquire(
                         accumulator_pipe_producer_state);
                     CUTE_UNROLL
@@ -574,7 +573,7 @@ __global__ static void rht_gemm_device(
                     // Issues a umma_arrive (commit)
                     // tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64
                     PRINT_ONE_WARP(
-                        printf("Committing mma for k_block k_tile, stage: %d, %d, %d\n",
+                        printf("MMA_WARP::Committing mma for k_block k_tile, stage: %d, %d, %d\n",
                                k_block, k_tile, accumulator_pipe_producer_state.index());
                         PRINT_DELIMITER)
 
