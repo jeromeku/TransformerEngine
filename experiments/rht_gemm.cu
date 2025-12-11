@@ -684,7 +684,7 @@ The scope of the arrive-on operation is the cluster scope.
             Copy_Atom<SM100_STORE_256bit_CACHE_NOALLOCATION, TC>{}, tiled_t2r);
         auto thr_t2r = tiled_t2r.get_slice(thread_idx);
         auto thr_r2g = tiled_r2g.get_slice(thread_idx);
-#if defined(DEBUG_EPILOGUE)
+// #if defined(DEBUG_EPILOGUE)
         if (elect_one_sync()) {
             PRINT_DELIMITER;
             print_cute("EPILOGUE_WARP::tCgC", tCgC);
@@ -692,8 +692,9 @@ The scope of the arrive-on operation is the cluster scope.
             print_cute("EPILOGUE_WARP::tiled_r2g", tiled_r2g);
             print_cute("EPILOGUE_WARP::thr_t2r", thr_t2r);
             print_cute("EPILOGUE_WARP::tiled_r2g", thr_r2g);
+            print_cute("EPILOGUE_WARP::gSFC_mn", gSFC_mn);
         }
-#endif
+// #endif
         // NVFP4 non-E8 recipe constants and global scales
         static constexpr float fp4_max = 6.0f;
 
@@ -742,6 +743,7 @@ The scope of the arrive-on operation is the cluster scope.
                 Tensor tDgC = thr_t2r.partition_D(
                     tCgC_mn);  // ((TMEM_LOAD,#TMEM_LOAD),MMA_M,MMA_N)
 
+
                 Tensor tTR_rAcc = make_tensor<ElementAccumulator>(
                     shape(tDgC));  // ((TMEM_LOAD,#TMEM_LOAD),MMA_M,MMA_N)
                 Tensor tDrC = make_tensor<TC>(shape(tDgC));
@@ -767,6 +769,26 @@ The scope of the arrive-on operation is the cluster scope.
                 Tensor tC_rRowSFD_frg =
                     recast<cutlass::Array<TSFC, NumVecs>>(tDrSFC);
 
+                if(thread_idx == 0 && k_tile == 0){
+                    print_cute("EPILOGUE_WARP::tCtC", tCtC);
+                    print_cute("EPILOGUE_WARP::tDtC", tDtC);
+                    print_cute("EPILOGUE_WARP::tCgC", tCgC);
+
+                    print_cute("EPILOGUE_WARP::tTR_rAcc", tTR_rAcc);
+                    print_cute("EPILOGUE_WARP::tTR_rAcc_frag", tTR_rAcc_frag);
+                    print_cute("EPILOGUE_WARP::tDrC_frag", tDrC_frag);
+
+                    print_cute("EPILOGUE_WARP::src", src);
+                    print_cute("EPILOGUE_WARP::dst", dst);
+                    print_cute("EPILOGUE_WARP::tCgSFC", tCgSFC);
+
+                    print_cute("EPILOGUE_WARP::tDgSFC", tDgSFC);
+                    print_cute("EPILOGUE_WARP::tDrSFC", tDrSFC);
+                    print_cute("EPILOGUE_WARP::NUMVECS", NUMVECS);
+                    print_cute("EPILOGUE_WARP::tC_rRowSFD_frg", tC_rRowSFD_frg);
+
+                }
+
                 cutlass::maximum_absolute_value_reduction<
                     cutlass::Array<ElementAccumulator, VectorSize>, true>
                     amax_reduction;
@@ -787,7 +809,7 @@ The scope of the arrive-on operation is the cluster scope.
                            accumulator_pipe_consumer_state.phase(),
                            accumulator_pipe_consumer_state.count());
                     PRINT_DELIMITER);
-                    
+
                 // Arrive on empty_barrier
                 accumulator_pipeline.consumer_release(
                     accumulator_pipe_consumer_state);
