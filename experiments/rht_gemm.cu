@@ -365,15 +365,15 @@ __global__ static void rht_gemm_device(
         }
         cute::wait_barrier(shared_storage.tma_barrier[0], 0 /*tma_phase_bit*/);
 
-#if defined(PRINT_DMA)
+// #if defined(PRINT_DMA)
         if (elect_one_sync()) {
             auto tAgA_mk = tAgA(_, 0, _);
             PRINT_DELIMITER
-            print_cute("DMA WARP: Loading tAgA_mk(_,k_tile_idx_n)",
+            print_cute("DMA_WARP::Loading_tAgA_mk(_,k_tile_idx_n)",
                        tAgA_mk(_, 0));
-            print_cute("DMA WARP: Loading tAsA(_,write_stage)", tAsA(_, 0));
+            print_cute("DMA_WARP::Loading_tAsA(_,write_stage)", tAsA(_, 0));
         }
-#endif
+// #endif
 
         do {
             bool is_first_wave = linear_tile_idx == blockIdx.x;
@@ -526,7 +526,7 @@ __global__ static void rht_gemm_device(
                 int read_stage = mainloop_pipe_consumer_state.index();
                 auto tCrA_mk = tCrA(_, _, _, read_stage);
                 auto tCrB_nk = tCrB(_, _, 0, 0);
-#if defined(DEBUG_MMA)
+// #if defined(DEBUG_MMA)
 
                 if (elect_one_sync()) {
                     // printf(
@@ -537,18 +537,18 @@ __global__ static void rht_gemm_device(
                     // mainloop_pipe_consumer_state.phase(),
                     // mainloop_pipe_consumer_state.count());
 
-                    print_cute("tCrA_mk", tCrA_mk);
-                    print_cute("tCrB_nk", tCrB_nk);
-                    print_cute("tCrA_mk(_, _, k_block * 4 + i) layout",
+                    print_cute("MMA_WARP::tCrA_mk", tCrA_mk);
+                    print_cute("MMA_WARP::tCrB_nk", tCrB_nk);
+                    print_cute("MMA_WARP::tCrA_mk(_, _, k_block * 4 + i) layout",
                                tCrA_mk(_, _, 0).layout());
                     auto A = tCrA_mk(_, _, 0);
-                    printf("decltype(size<0>(A))::value: %d\n",
+                    printf("MMA_WARP::decltype(size<0>(A))::value: %d\n",
                            decltype(size<0>(A))::value);
-                    printf("decltype(size<0>(A))::value: %d\n",
+                    printf("MMA_WARP::decltype(size<0>(A))::value: %d\n",
                            decltype(size<0>(tCrB_nk))::value);
-                    printf("size<2>(tCrA) / 4: %d\n", size<2>(tCrA) / 4);
+                    printf("MMA_WARP::size<2>(tCrA) / 4: %d\n", size<2>(tCrA) / 4);
                 }
-#endif
+// #endif
                 CUTE_UNROLL
                 for (int k_block = 0; k_block < size<2>(tCrA) / 4; ++k_block) {
 #if defined(DEBUG_MMA)
