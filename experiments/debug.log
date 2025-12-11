@@ -42,9 +42,9 @@ Sw<3,4,3> o smem_ptr[16b](unset) o (((_64,_2),(_8,_2)),_1,_4,(_1,_13)):(((_1,_51
 sB
 Sw<1,4,3> o smem_ptr[16b](unset) o ((_16,_16),_1,_1,(_1,_13)):((_1,_16),_0,_0,(_0,_256))
 gA_mk
-gmem_ptr[16b](0x6b4eb000000) o (_128,_64,1,6):(_1,128,_128,8192)
+gmem_ptr[16b](0xc3f2b000000) o (_128,_64,1,6):(_1,128,_128,8192)
 gB_nk
-gmem_ptr[16b](0x6b4eb018000) o (_16,_16,1,1):(_1,16,_16,256)
+gmem_ptr[16b](0xc3f2b018000) o (_16,_16,1,1):(_1,16,_16,256)
 
  ------------------------------------------------------------- 
 mA
@@ -52,7 +52,7 @@ ArithTuple(_0,_0) o (128,384):(_1@0,_1@1)
 mB
 ArithTuple(_0,_0) o (16,16):(_1@0,_1@1)
 mC
-subptr[4b](0x6b4eb018200.0) o (128,384):(64,_1)
+subptr[4b](0xc3f2b018200.0) o (128,384):(64,_1)
 sfc_layout
 (128,((_16,_4),6)):(24,((_0,_1),_4))
 
@@ -70,13 +70,13 @@ ArithTuple(_0,_0) o (_128,_64,1,6):(_1@0,_1@1,_128@0,_64@1)
 gB_nk
 ArithTuple(_0,_0) o (_16,_16,1,1):(_1@0,_1@1,_16@0,_16@1)
 gC_mn
-subptr[4b](0x6b4eb018200.0) o (_128,_64,1,6):(64,_1,8192,_64)
+subptr[4b](0xc3f2b018200.0) o (_128,_64,1,6):(64,_1,8192,_64)
 gSFC_mn
-gmem_ptr[8b](0x6b4eb024200) o (_128,(_16,_4),1,6):(24,(_0,_1),3072,_4)
+gmem_ptr[8b](0xc3f2b024200) o (_128,(_16,_4),1,6):(24,(_0,_1),3072,_4)
 tCsA
-Sw<3,4,3>_smem_ptr[16b](0x6b600000580) o (((_64,_2),(_8,_2)),_1,_4,(_1,_13)):(((_1,_512),(_64,_1024)),_0,_2048,(_0,_8192))
+Sw<3,4,3>_smem_ptr[16b](0xc4000000580) o (((_64,_2),(_8,_2)),_1,_4,(_1,_13)):(((_1,_512),(_64,_1024)),_0,_2048,(_0,_8192))
 tCsB
-Sw<1,4,3>_smem_ptr[16b](0x6b600034580) o ((_16,_16),_1,_1,(_1,_13)):((_1,_16),_0,_0,(_0,_256))
+Sw<1,4,3>_smem_ptr[16b](0xc4000034580) o ((_16,_16),_1,_1,(_1,_13)):((_1,_16),_0,_0,(_0,_256))
 
  ------------------------------------------------------------- 
 thr_mma
@@ -141,7 +141,7 @@ tmem_[32b](0x0000.0000) o ((_128,_64),_1,_1,_4):((_65536,_1),_0,_0,_64)
 tAgA
 ArithTuple(_0,_0) o (((_64,_8),(_2,_8)),1,6):(((_1@0,_1@1),(_64@0,_8@1)),_128@0,_64@1)
 tAsA
-Sw<3,4,3>_smem_ptr[16b](0x6b600000580) o ((_512,_16),(_1,_13)):((_1,_512),(_0,_8192))
+Sw<3,4,3>_smem_ptr[16b](0xc4000000580) o ((_512,_16),(_1,_13)):((_1,_512),(_0,_8192))
 tBgB
 ArithTuple(_0,_0) o (((_16,_16),_1),1,1):(((_1@0,_1@1),_0),_16@0,_16@1)
 tBsB
@@ -174,289 +174,297 @@ EPILOGUE_WARP::tCgC
 EPILOGUE_WARP::tCgC
 DMA_WARP::Acquired mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 3), (2, 1, 2)
 MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 0, 6
-subptr[4b](0x6b4eb018200.0)subptr[4b](0x6b4eb018200.0)subptr[4b](0x6b4eb018200.0)subptr[4b](0x6b4eb018200.0)DMA_WARP::Acquired mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 4), (3, 1, 3)
- o MMA_WARP::Awaiting mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 0), (0, 0, 0)
- o  o  o (DMA_WARP::Acquired mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 5), (4, 1, 4)
-MMA_WARP:: Awaiting accumulator pipeline stage: 0
-(((((MMA_WARP::Committing mma for k_block k_tile, stage: 0, 0, 0
-(DMA_WARP::Acquired mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 6), (5, 1, 5)
-(__
+subptr[4b](0xc3f2b018200.0)subptr[4b](0xc3f2b018200.0)subptr[4b](0xc3f2b018200.0)subptr[4b](0xc3f2b018200.0) o DMA_WARP::Acquired mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 4), (3, 1, 3)
+ o  o  o MMA_WARP::Awaiting mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 0), (0, 0, 0)
+((((MMA_WARP:: Awaiting accumulator pipeline stage: 0
+DMA_WARP::Acquired mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 5), (4, 1, 4)
+((((MMA_WARP::Committing mma for k_block k_tile, stage: 0, 0, 0
+_DMA_WARP::Acquired mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 6), (5, 1, 5)
+___
  ------------------------------------------------------------- 
-__DMA_WARP::producer_tail
-128128128MMA_WARP::Awaiting mainloop pipeline stage: 1
-128,,,MMA_WARP::Releasing mainloop pipeline stage: 0
-_,__
+128128128DMA_WARP::producer_tail
+128,MMA_WARP::Awaiting mainloop pipeline stage: 1
+,,,_MMA_WARP::Releasing mainloop pipeline stage: 0
+___6464
  ------------------------------------------------------------- 
-64_6464)64MMA_WARP:Awaiting mainloop pipeline
-)),)MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 1, 6
-,,_,__MMA_WARP::Awaiting mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 1), (1, 0, 1)
-1_11,MMA_WARP:: Awaiting accumulator pipeline stage: 1
-,1,_MMA_WARP::Committing mma for k_block k_tile, stage: 0, 1, 1
-_,_1
+6464)))MMA_WARP:Awaiting mainloop pipeline
+),,,MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 1, 6
+_,__1_MMA_WARP::Awaiting mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 1), (1, 0, 1)
+11,1MMA_WARP:: Awaiting accumulator pipeline stage: 1
+,,_,_MMA_WARP::Committing mma for k_block k_tile, stage: 0, 1, 1
+_11_
  ------------------------------------------------------------- 
-1_1,MMA_WARP::Awaiting mainloop pipeline stage: 2
-,1,1MMA_WARP::Releasing mainloop pipeline stage: 1
-1,,1
+1,,1,1MMA_WARP::Awaiting mainloop pipeline stage: 2
+1,1,MMA_WARP::Releasing mainloop pipeline stage: 1
+,1,6
  ------------------------------------------------------------- 
-,6,1MMA_WARP:Awaiting mainloop pipeline
-6)6,MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 2, 6
-):)6:(:MMA_WARP::Awaiting mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 2), (2, 0, 2)
-)(((MMA_WARP:: Awaiting accumulator pipeline stage: 2
-:(64(MMA_WARP::Committing mma for k_block k_tile, stage: 0, 2, 2
-(64,64(,
+6,6)MMA_WARP:Awaiting mainloop pipeline
+)6):MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 2, 6
+:)(:(MMA_WARP::Awaiting mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 2), (2, 0, 2)
+:((((64MMA_WARP:: Awaiting accumulator pipeline stage: 2
+(64(,64MMA_WARP::Committing mma for k_block k_tile, stage: 0, 2, 2
+,64_,
  ------------------------------------------------------------- 
-_,_64MMA_WARP::Awaiting mainloop pipeline stage: 3
-1_1,)MMA_WARP::Releasing mainloop pipeline stage: 2
-1)_,
+_,1_MMA_WARP::Awaiting mainloop pipeline stage: 3
+1_)1MMA_WARP::Releasing mainloop pipeline stage: 2
+)1,)
  ------------------------------------------------------------- 
-),1_MMA_WARP:Awaiting mainloop pipeline
-,_)0_MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 3, 6
-0,,0,_MMA_WARP::Awaiting mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 3), (3, 0, 3)
-_,_00MMA_WARP:: Awaiting accumulator pipeline stage: 3
-_0,,MMA_WARP::Committing mma for k_block k_tile, stage: 0, 3, 3
-0,_8192
+,_),_MMA_WARP:Awaiting mainloop pipeline
+0,_0,MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 3, 6
+_0,_0,MMA_WARP::Awaiting mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 3), (3, 0, 3)
+_0,_0MMA_WARP:: Awaiting accumulator pipeline stage: 3
+,_,08192MMA_WARP::Committing mma for k_block k_tile, stage: 0, 3, 3
+81920,,
  ------------------------------------------------------------- 
-,81920,8192MMA_WARP::Awaiting mainloop pipeline stage: 4
-,,_,MMA_WARP::Releasing mainloop pipeline stage: 3
-_819264_
+,,_8192MMA_WARP::Awaiting mainloop pipeline stage: 4
+_819264,MMA_WARP::Releasing mainloop pipeline stage: 3
+64,)_
  ------------------------------------------------------------- 
-64),64)MMA_WARP:Awaiting mainloop pipeline
+)_
+64MMA_WARP:Awaiting mainloop pipeline
 
-_)
-MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 4, 6
-EPILOGUE_WARP::tiled_t2r
-64
+64EPILOGUE_WARP::tiled_t2r
+)MMA_WARP::tile_idx_m, tile_idx_n, k_tile, K_TILE_MAX: 0, 0, 4, 6
 EPILOGUE_WARP::tiled_t2r
 )TiledCopy
+
 MMA_WARP::Awaiting mainloop pipeline at (tile_m, tile_n, k_tile), (stage, phase, count): (0, 0, 4), (4, 0, 4)
+TiledCopy
+
 EPILOGUE_WARP::tiled_t2r
-TiledCopy
-
   Tiler_MN:       MMA_WARP:: Awaiting accumulator pipeline stage: 0
-TiledCopy
   Tiler_MN:       EPILOGUE_WARP::tiled_t2r
-(  Tiler_MN:       (TiledCopy
-(((  Tiler_MN:       _(_256(_256,(256,__,_32256_32),32):_):(32:()__(:3232_(,,32___,3211_),)1,,_)_1_,11)_:,:1___:001_,,:0___,101_::,1___:001_):)0
-
-_)  TiledLayout_TV: 0  TiledLayout_TV: 
-()(  TiledLayout_TV: ((
-(__  TiledLayout_TV: (3232(_,,(32___4,324)_),,4,_()(4_,_)64(64,,_,(__64_3232,64))_,))32:_:)(32()()(:_)_(00:(,,(__(_101_),)0,_,,(1(__)_14,4),(,,___(2564_256)),4))_,
-
-_256Copy_Atom
-Copy_Atom
-256)  ThrID:        )  ThrID:        )_)_
-3232
-Copy_Atom
-::Copy_Atom
-_  ThrID:        _1  ThrID:        _1_
-32
-32  ValLayoutSrc: :  ValLayoutSrc: :_(_(_1_132
-32
-,  ValLayoutSrc: ,  ValLayoutSrc: _(_(2048_2048_)32)32:,:,(_(___2048204800)),,::__((11__))00
-,
-,  ValLayoutDst: _  ValLayoutDst: _(1(1_)_)3232
-,
-,  ValLayoutDst: __  ValLayoutDst: (6464(_)_)32:32:,(,(____64646464),),:_:_(1(1_)_)64
-64
-,  ValLayoutRef: ,  ValLayoutRef: _(_(1_1_32))32,
-
-,_  ValLayoutRef: _  ValLayoutRef: 2048(2048)(_):_32:32(,(_,__0_20480,2048),)_:_1:(1)(_)_
-0
-  ValueType:    0,  ValueType:    ,32_32_b
-1b
-
-1)
-EPILOGUE_WARP::tiled_r2g
-)
-EPILOGUE_WARP::tiled_r2g
-
-TiledCopy
-  ValueType:    TiledCopy
-  ValueType:      Tiler_MN:       32  Tiler_MN:       (32b
-((b
-
-(_
-EPILOGUE_WARP::tiled_r2g
-_256EPILOGUE_WARP::tiled_r2g
-TiledCopy
-256,TiledCopy
-,  Tiler_MN:       _  Tiler_MN:       _(32(32()()_:_:256(256(_,,_32__32,3232,_))_1:1:)()(,_,__32_132,1:,_:__1_01)0,),,_,___111:1::_:__0_00)0),
-,
-_  TiledLayout_TV: _  TiledLayout_TV: 1(1(:(:(____320032,)),_
-_
-44  TiledLayout_TV:   TiledLayout_TV: ))(,(,((((____32643264,,,,____4141)))),),)(:(:(__((6464(_,,_256__256,11,_))_1))1)::),(,((((_(__4_2564,256,,_,__0_10)1)))),)
-,
-((Copy_Atom
-_Copy_Atom
-_  ThrID:        4  ThrID:        4_,_1,_1:_0:_0)_)00)
-)
-
-
-  ValLayoutSrc:   ValLayoutSrc: Copy_Atom
-Copy_Atom
-((  ThrID:        _  ThrID:        __1_11,1,:_:__64_640)0):
-
-:(  ValLayoutSrc:   ValLayoutSrc: (_(_0(_0_,1,1_,_1,_1_)64)64
-)
-)  ValLayoutDst: :  ValLayoutDst: :((((___1_10,0,,_,__64_641)1)):):
-(
-(  ValLayoutDst: _  ValLayoutDst: _(0(0_,_,1_1_,1,1_)_)64
-64
-)  ValLayoutRef: )  ValLayoutRef: :(:((_(__1_10,0,,_,__64_641)1)):):
-(
-(  ValLayoutRef: __  ValLayoutRef: 0(0(,_,__1_11,1),_)_
-64
-  ValueType:    64)  ValueType:    )4:4:b
-(b
-
-(_
-_EPILOGUE_WARP::thr_t2r
-0EPILOGUE_WARP::thr_t2r
-0ThrCopy
-,ThrCopy
-,  ThrIdx: _  ThrIdx: _321961
-)
-TiledCopy
-)
-TiledCopy
-
-  Tiler_MN:         ValueType:      Tiler_MN:         ValueType:    (4((4b
-(_b
-
-_256
-256EPILOGUE_WARP::thr_t2r
-,EPILOGUE_WARP::thr_t2r
-,ThrCopy
-_ThrCopy
-_  ThrIdx: 3232  ThrIdx: 64))0
-::
-TiledCopy
 (TiledCopy
-(  Tiler_MN:       __  Tiler_MN:       32(32(,(,(____12561256),),,_,___321321):)::_:_0((0,__,_3232_1,,1:__:_1_10)0)),),
-_
-_  TiledLayout_TV: 11  TiledLayout_TV: (::((__(_00_32,32,,_,__1_41:4:)_),_0,0()(_)
-_64
-  TiledLayout_TV: 64,  TiledLayout_TV: (,_((_32(_32)_32))32,),:_:(_4((4)()_,_0,(0,(_,___641641,),)_,_,32(32(_))_4))4:,:,_((_256(256()_)_0))0,
-,
-_Copy_Atom
-_Copy_Atom
-1  ThrID:        1  ThrID:        )_)_,32,32(:(:____4114
-,
-,  ValLayoutSrc: _  ValLayoutSrc: _256(256()_)_32))32,
-
-,_Copy_Atom
-_Copy_Atom
-2048  ThrID:        2048  ThrID:        )_)_:32:32(:(_:__0_10,1
-,_
-  ValLayoutSrc: _1  ValLayoutSrc: 1()()
-__
-32  ValLayoutDst: 32  ValLayoutDst: ,(,_(___322048204832,)),_::_(64(64)__)0:0:,(,(____164164,)),_
-
-_1  ValLayoutDst:   ValLayoutDst: 1)(()
-__
-  ValLayoutRef: 3232  ValLayoutRef: ,(,(____32646432,)),_::_2048((2048)__)64:64:(,,(____0110,)),_
-
-_1  ValLayoutRef:   ValLayoutRef: 1)(()
-__
-  ValueType:    3232  ValueType:    ,32,32b
-__b
-
-20482048
-)EPILOGUE_WARP::tiled_r2g
-)EPILOGUE_WARP::tiled_r2g
-:ThrCopy
-:ThrCopy
-(  ThrIdx: (  ThrIdx: _32_960
+((TiledCopy
+  Tiler_MN:       _(  Tiler_MN:       (256_((,256_(_,256_32_,256)32_,:)32(:_)_32(:32_)(32,:_,(_32__1,132)_),,1,__)_11,1):_:,_1__0:01,_,:_0__1,10:_:,_1__0:01)_):
 0
-TiledCopy
-,,TiledCopy
-_  Tiler_MN:       _  Tiler_MN:       1(1()()(_
+_  TiledLayout_TV: )0  TiledLayout_TV: (
+)((  TiledLayout_TV: (
+_(_  TiledLayout_TV: 32(32,(_,_(32_4_,4)32_),,4,(_)(_4,_64)(64,,_,_(_6432_32,)64)_),)32:_:)((32)()(:__)(00:(,,(___(011_,))0_,,,(1_(_)_14,4),(,,___(2564256_),)4_)),256
 
-_256  ValueType:      ValueType:    256,3232,_b
-b
-_
+_)Copy_Atom
+256Copy_Atom
+)  ThrID:        )  ThrID:        
+_)_Copy_Atom
 32
-32)EPILOGUE_WARP::tiled_r2g
-EPILOGUE_WARP::tiled_r2g
-):ThrCopy
-:ThrCopy
-(  ThrIdx: (  ThrIdx: _0_3264
-32,
-TiledCopy
-,_TiledCopy
-  Tiler_MN:       _1  Tiler_MN:       1())(,(,(____12561256:,:,____032032,),_):_1:1(:(:____320320),,)_
+32:  ThrID:        :Copy_Atom
+___  ThrID:        1321
+_:
+32  ValLayoutSrc: _  ValLayoutSrc: :1((_
+__132  ValLayoutSrc: 32
+,(,  ValLayoutSrc: ___(2048322048_),)32:_:,(2048(__)_20480:0),(,:___(101_),)0
 _
-  TiledLayout_TV: 11  TiledLayout_TV: )()(,(,(____321132,:,:____0440),),,__,(11(_:_:64_64_0,,0_)_)1
-1
-)  TiledLayout_TV: ))  TiledLayout_TV: ():((:((_((_(32_32_,256,256,__,4_4_1))1),,),((,_(_(_64_64,44,,_,__1_10)0)))))):):
-(
-(Copy_Atom
-(Copy_Atom
-(_  ThrID:          ThrID:        _256__256,11,:_:__1_10)0)
+,  ValLayoutDst: 1  ValLayoutDst: _)((1_
+_)32  ValLayoutDst: 32
+,(,  ValLayoutDst: ___(646432_)),32::_,((64___)646464:,,)(__:_11(64)_),
+
+64_  ValLayoutRef: ,  ValLayoutRef: 1(_()__1
+3232)  ValLayoutRef: ,
+,_(_  ValLayoutRef: 2048_2048()32)_:,:32(_(,_2048__0)02048,:,)_(_:1_1()0)_
 ,
-,(  ValLayoutSrc:   ValLayoutSrc: (_(_(_4_41,,1,__,0__064)64))))):
-:
-(Copy_Atom
-(Copy_Atom
-_  ThrID:        _0  ThrID:        _0,_1,_1_:1:1_)_)
-00
-
-  ValLayoutDst: 
-  ValLayoutDst:   ValLayoutSrc: (  ValLayoutSrc: (_((_1__1,11,_,_,64_64_64))64:):)(:(:_(_0(_0,_0,_0,_1,_1)_1)
-1)
-  ValLayoutRef: )
-  ValLayoutRef: 
-(  ValLayoutDst: (_  ValLayoutDst: _(1(1_,_,_11_64,,64)__)64:64:())(:_:_0((0,__,0_0_1,,1_)_)
-11
-)  ValueType:    )  ValueType:    
-4
-4b
-  ValLayoutRef:   ValLayoutRef: b
-
-((
-_EPILOGUE_WARP::gSFC_mn
-_EPILOGUE_WARP::gSFC_mn
-1gmem_1gmem_,ptr[,ptr[_8_8b](0x6b4eb024200)6464b](0x6b4eb024200) o )) o :(:(_((__128128_,0,0(,,(____161161),,)_
-_
-4  ValueType:    4  ValueType:    ))44,,b
+0  ValueType:    _  ValueType:    ,13232_)b
 b
-11
+1
 
-,,EPILOGUE_WARP::gSFC_mn
-EPILOGUE_WARP::gSFC_mn
-66gmem_gmem_))ptr[ptr[::88b](0x6b4eb024200)((b](0x6b4eb024200)2424 o  o ,,((((____12812800,,,(,(____116116),),,_,_3072430724,),)_,_,4141),),
-6
-6))::((2424,,((__00,,__11)),,30723072,,__44))
+)
+EPILOGUE_WARP::tiled_r2g
+  ValueType:    EPILOGUE_WARP::tiled_r2g
 
+32TiledCopy
+  ValueType:    TiledCopy
+b
+  Tiler_MN:         Tiler_MN:       32
+(b
+(EPILOGUE_WARP::tiled_r2g
+((
+TiledCopy
+__EPILOGUE_WARP::tiled_r2g
+256256  Tiler_MN:       TiledCopy
+,,(  Tiler_MN:       __((3232_())256_::,256((_,__3232_32),,32:__)(11:_)()32,_,,_32__1,11:_:)_1_,0)0_,,,1___:111_:::0___,000_),)1
+_
+:  TiledLayout_TV: 1  TiledLayout_TV: _:(0((_)(_0_
+32)32  TiledLayout_TV: ,
+,(_  TiledLayout_TV: _(4(4_)()32,_,,(32(__,_464_64),4,_,)_1(,1_)()64)_),:64:_(,1((_)_(1256)_,)256:_,)(1_:()1(_,(256)(_,,_256_(4,1_,_)4_1,,0)_(),0_())4
+_),Copy_Atom
+4
+_,  ThrID:        Copy_Atom
+0__)  ThrID:        01)_:)
+1_)Copy_Atom
+:0
+_  ThrID:        
+Copy_Atom
+0_  ValLayoutSrc:   ThrID:        
+1(_:  ValLayoutSrc: _1_(1:_0,_1
+_0,  ValLayoutSrc: 64
+_()  ValLayoutSrc: 64_:)(1(_:,_1(_0,_64,_0)_64,1:)_)(:1
+_)(  ValLayoutDst: 0
+_(,  ValLayoutDst: _0_(1,1__,)11_
+,64)  ValLayoutDst: _)
+(64:  ValLayoutDst: _)((1:__(,01__,,640__),164_:))1(
+:)_  ValLayoutRef: (
+0_(  ValLayoutRef: ,_0_(1,1_,_1)1_,
+64)_  ValLayoutRef: )
+64(:  ValLayoutRef: )_((:_1_(0,_1,_0,_64,1_)_64):1
+)():  ValueType:    _
+4(0  ValueType:    _b
+,4
+0_b
+EPILOGUE_WARP::thr_t2r
+,1
+_ThrCopy
+)EPILOGUE_WARP::thr_t2r
+1  ThrIdx: 
+ThrCopy
+)32  ValueType:      ThrIdx: 
+
+496  ValueType:    TiledCopy
+b
+
+  Tiler_MN:       4
+TiledCopy
+b
+(EPILOGUE_WARP::thr_t2r
+  Tiler_MN:       (
+ThrCopy
+(_EPILOGUE_WARP::thr_t2r
+(  ThrIdx: 256ThrCopy
+_64,  ThrIdx: 256
+_,0TiledCopy
+32_
+)  Tiler_MN:       32:TiledCopy
+()(  Tiler_MN:       (:_(_(32(256__,,32256__,,132_)_)132,:)_)(,1:__(:132__:,032__,,01__,)11_,):_1_,1:0__:)10_
+:)0_  TiledLayout_TV: 
+,0(  TiledLayout_TV: _(,1(__:(321__,:320__),40_
+))4  TiledLayout_TV: ,
+)((  TiledLayout_TV: ,(_((_64_(32,_64_,32,32__,)4)32_):)4,)()(:,(__((640(_,,_64__,0321_,))32_),)1:())(_:,(4((_,(_0__4,2560,_),_1)_256)
+1),Copy_Atom
+))(,  ThrID:        
+_(_Copy_Atom
+4_32  ThrID:        ,4:__,_256321_):256
+_)  ValLayoutSrc: )1
+)(
+Copy_Atom
+_
+  ValLayoutSrc:   ThrID:        32Copy_Atom
+(_,  ThrID:        _32__32:204832,_):_1:_2048
+(1)  ValLayoutSrc: _
+:0(  ValLayoutSrc: (,_(__320_1,,32)__
+,20481_  ValLayoutDst: ))2048(:
+)_(  ValLayoutDst: 32:_((,0___,32640_,),_1_:)641()
+_):  ValLayoutDst: 64
+((,  ValLayoutDst: ___(64321_,,)32__
+,164  ValLayoutRef: _))(64
+:_)  ValLayoutRef: (32:(_,(_64__32,204864,_),_1:_2048)(1)
+_):  ValLayoutRef: 0
+((,  ValLayoutRef: ___(0321_,,)32__
+,12048  ValueType:    _))204832
+:)b
+  ValueType:    (:
+_32(EPILOGUE_WARP::tiled_r2g
+0b
+_ThrCopy
+,
+0  ThrIdx: _EPILOGUE_WARP::tiled_r2g
+,321ThrCopy
+_
+)  ThrIdx: TiledCopy
+1
+96)  Tiler_MN:         ValueType:    
+
+(32TiledCopy
+(  ValueType:    b
+  Tiler_MN:       _32
+(256b
+EPILOGUE_WARP::tiled_r2g
+(,
+_ThrCopy
+_EPILOGUE_WARP::tiled_r2g
+256  ThrIdx: 32ThrCopy
+,)64  ThrIdx: _:
+032(TiledCopy
+
+)_  Tiler_MN:       TiledCopy
+:32(,(  Tiler_MN:       (__(_132(256),_,_,256_1_,32)1_),32::__)(10:_:,(32___,0132_,,:1___)101,:))__,
+01  TiledLayout_TV: _):1(
+_:(  TiledLayout_TV: 0__,(320_(,,_1__32:41_,):0_,_4)0()
+_),  TiledLayout_TV: 64
+((,  TiledLayout_TV: __((641_(,)32__),132:_),(4)_():_4,()256((,,___(642561_,,)64__,,11(_))_1,)4)(:,)_(_:4(0(,_()_256)_0,
+256)_Copy_Atom
+,)1  ThrID:        _
+)_1Copy_Atom
+,1)(  ThrID:        :,__(_410_,:
+4__,  ValLayoutSrc: 00_()
+_0)  ValLayoutSrc: 1)
+(,)_Copy_Atom
+_
+1  ThrID:        64Copy_Atom
+,_)  ThrID:        _1:_64:(1)__::00_(
+,0_  ValLayoutSrc: _
+01(,  ValLayoutSrc: )__
+(11_  ValLayoutDst: ,)1(_
+,_64  ValLayoutDst: _1)(,64:__)(1:64_,)(0__:,64(0_)_,1:_0)(,1
+__)0  ValLayoutDst: 
+1,()  ValLayoutDst: __
+(11  ValLayoutRef: _),(1
+__,  ValLayoutRef: 641_(),64_:_)1(64:,_)(_0_:64,0()_,_:10_(),1__
+)01  ValLayoutRef: 
+,)(_  ValLayoutRef: 
+_1(  ValueType:    1)_4,
+b
+1_  ValueType:    
+,644_EPILOGUE_WARP::gSFC_mn
+)b
+64gmem_:
+ptr[)(EPILOGUE_WARP::gSFC_mn
+:8_gmem_b](0xc3f2b024200)(0ptr[_ o ,8(0_b](0xc3f2b024200)_,1 o 128_)(1,
+_()128  ValueType:    
+_,416  ValueType:    (b
+,4_
+_b
+16EPILOGUE_WARP::gSFC_mn
+4
+,)gmem_EPILOGUE_WARP::gSFC_mn
+_,ptr[4gmem_18),ptr[b](0xc3f2b024200),68 o 1b](0xc3f2b024200))(,: o _6(()128_24:,,128(((,_24_(,160_(,16,___,041_,))4_,,)113072,),,1,6_,3072)46,:))_(
+:424(),24
+(,_(0_,0_,1_)1,)3072,,3072_,4_)4
+)
 
  ------------------------------------------------------------- 
 EPILOGUE_WARPS:: Awaiting on accumulator pipe for (tile_idx_m, tile_idx_n, k_tile), (stage, phase, count) K_TILE_MAX: (0, 0, 0), (0, 0, 0)
+EPILOGUE_WARP::tCgC
+subptr[4b](0xc3f2b018200.0) o ((_128,_64),_1,_1,1,6):((64,_1),_0,_0,8192,_64)
+EPILOGUE_WARP::tCgC_mn
+subptr[4b](0xc3f2b018200.0) o ((_128,_64),_1,_1):((64,_1),_0,_0)
+EPILOGUE_WARP::gSFC_mn
+gmem_ptr[8b](0xc3f2b024200) o (_128,(_16,_4),1,6):(24,(_0,_1),3072,_4)
+EPILOGUE_WARP::tCgSFC_mn
+gmem_ptr[8b](0xc3f2b024200) o (_128,(_16,_4)):(24,(_0,_1))
 EPILOGUE_WARP::tCtC
 tmem_[32b](0x0000.0000) o ((_128,_64),_1,_1):((_65536,_1),_0,_0)
 EPILOGUE_WARP::tDtC
 tmem_[32b](0x0000.0000) o (((_64,_32),_1),_1,_1,_1):(((_1,_65536),_0),_0,_0,_0)
 EPILOGUE_WARP::tCgC
-subptr[4b](0x6b4eb018200.0) o ((_128,_64),_1,_1,1,6):((64,_1),_0,_0,8192,_64)
+subptr[4b](0xc3f2b018200.0) o ((_128,_64),_1,_1,1,6):((64,_1),_0,_0,8192,_64)
 EPILOGUE_WARP::tTR_rAcc
-ptr[32b](0x6b505fffa20) o ((_64,_1),_1,_1,_1):((_1,_0),_0,_0,_0)
+ptr[32b](0xc3f45fffa20) o ((_64,_1),_1,_1,_1):((_1,_0),_0,_0,_0)
 EPILOGUE_WARP::tTR_rAcc_frag
-ptr[2048b](0x6b505fffb50) o _1:_1
+ptr[2048b](0xc3f45fffb50) o _1:_1
 EPILOGUE_WARP::tDrC_frag
-ptr[256b](0x6b505fffc50) o _1:_1
+ptr[256b](0xc3f45fffc50) o _1:_1
 EPILOGUE_WARP::src
-subptr[4b](0x6b505fffc50.0) o ((_64,_1),_1,_1,_1):((_1,_0),_0,_0,_0)
+subptr[4b](0xc3f45fffc50.0) o ((_64,_1),_1,_1,_1):((_1,_0),_0,_0,_0)
 EPILOGUE_WARP::dst
-subptr[4b](0x6b4eb018200.0) o ((_64,_1),_1,_1,_1):((_1,_0),_0,_0,_0)
+subptr[4b](0xc3f2b018200.0) o ((_64,_1),_1,_1,_1):((_1,_0),_0,_0,_0)
 EPILOGUE_WARP::tCgSFC
-gmem_ptr[8b](0x6b4eb024200) o ((_128,(_16,_4)),_1,_1):((24,(_0,_1)),_0,_0)
+gmem_ptr[8b](0xc3f2b024200) o ((_128,(_16,_4)),_1,_1):((24,(_0,_1)),_0,_0)
 EPILOGUE_WARP::tDgSFC
-gmem_ptr[8b](0x6b4eb024200) o _4:_1
+gmem_ptr[8b](0xc3f2b024200) o _4:_1
 EPILOGUE_WARP::tDrSFC
-ptr[8b](0x6b505fffa20) o _4:_1
+ptr[8b](0xc3f45fffa20) o _4:_1
 EPILOGUE_WARP::NUMVECS
 4
 EPILOGUE_WARP::tC_rRowSFD_frg
-ptr[32b](0x6b505fffc70) o _1:_1
+ptr[32b](0xc3f45fffc70) o _1:_1
 EPILOGUE_WARPS:: Releasing accumulator pipe for (tile_idx_m, tile_idx_n, k_tile), (stage, phase, count) K_TILE_MAX: (0, 0, 0), (0, 0, 0)
 
  ------------------------------------------------------------- 

@@ -770,6 +770,11 @@ The scope of the arrive-on operation is the cluster scope.
                     recast<cutlass::Array<TSFC, NumVecs>>(tDrSFC);
 
                 if(thread_idx == 0 && k_tile == 0){
+                    print_cute("EPILOGUE_WARP::tCgC", tCgC);
+                    print_cute("EPILOGUE_WARP::tCgC_mn", tCgC_mn);
+                    print_cute("EPILOGUE_WARP::gSFC_mn", gSFC_mn);
+                    print_cute("EPILOGUE_WARP::tCgSFC_mn", tCgSFC_mn);
+
                     print_cute("EPILOGUE_WARP::tCtC", tCtC);
                     print_cute("EPILOGUE_WARP::tDtC", tDtC);
                     print_cute("EPILOGUE_WARP::tCgC", tCgC);
