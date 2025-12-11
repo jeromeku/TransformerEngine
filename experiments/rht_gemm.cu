@@ -564,9 +564,17 @@ __global__ static void rht_gemm_device(
                     }
 #endif
                     PRINT_ONE_WARP(
-                        printf("MMA_WARP:: Acquiring accumulator pipeline "
+                        printf("MMA_WARP:: Awaiting accumulator pipeline "
                                "stage: %d\n",
                                accumulator_pipe_producer_state.index()););
+                    /*  CUTLASS_DEVICE
+  void producer_acquire(uint32_t stage, uint32_t phase, ProducerToken
+  barrier_token) { detail::pipeline_check_is_producer(params_.role); if
+  (barrier_token == BarrierStatus::WaitAgain) {
+      empty_barrier_ptr_[stage].wait(phase);
+    }
+  }
+*/
                     accumulator_pipeline.producer_acquire(
                         accumulator_pipe_producer_state);
                     CUTE_UNROLL
@@ -600,13 +608,46 @@ __global__ static void rht_gemm_device(
                 PRINT_ONE_WARP(
                     printf("MMA_WARP::Awaiting mainloop pipeline stage: %d\n",
                            mainloop_pipe_consumer_state.index());)
+/*
+  ConsumerToken consumer_try_wait(uint32_t stage, uint32_t phase, uint32_t skip_wait) {
+    detail::pipeline_check_is_consumer(params_.role);
+    if (skip_wait) {
+      return {BarrierStatus::WaitDone};
+    }
+    bool barrier_status = full_barrier_ptr_[stage].try_wait(phase);
+    return {static_cast<BarrierStatus>(barrier_status)};
+  }
 
+*/
                 barrier_token = mainloop_pipeline.consumer_try_wait(
                     mainloop_pipe_consumer_state, skip_wait);
                 PRINT_ONE_WARP(
                     printf("MMA_WARP::Releasing mainloop pipeline stage: %d\n",
                            curr_mainloop_pipe_consumer_state.index());)
-                mainloop_pipeline.consumer_release(
+    /*
+      CUTLASS_DEVICE
+  void consumer_release(uint32_t stage, uint32_t skip) {
+    detail::pipeline_check_is_consumer(params_.role);
+    uint64_t* smem_ptr = reinterpret_cast<uint64_t*>(&empty_barrier_ptr_[stage]);
+    ...
+    if (!skip) {
+        if constexpr (cute::is_static_v<ClusterShape> and size(ClusterShape{}) == 1) {
+          cutlass::arch::umma_arrive(smem_ptr);
+        }
+        else {
+          cutlass::arch::umma_arrive_multicast(smem_ptr, block_id_mask_);
+        }
+      }
+    }
+  }
+};
+
+The qualifier .mbarrier::arrive::one indicates that upon the completion of the 
+prior asynchronous tcgen05 operation issued by the current thread, 
+an arrive-on operation, with the count argument of 1, is signaled on the mbarrier object. 
+The scope of the arrive-on operation is the cluster scope.
+    */
+            mainloop_pipeline.consumer_release(
                     curr_mainloop_pipe_consumer_state);
             }
 
@@ -690,6 +731,7 @@ __global__ static void rht_gemm_device(
 #endif
                 }
 
+                // Blocking wait on full_barrier (ClusterBarrier) 
                 accumulator_pipeline.consumer_wait(
                     accumulator_pipe_consumer_state);
 
@@ -735,18 +777,18 @@ __global__ static void rht_gemm_device(
                 cutlass::arch::fence_view_async_tmem_load();
 
                 PRINT_ONE_WARPGROUP(
-                    printf(
-                        "EPILOGUE_WARPS:: Awaiting on accumulator pipe for "
-                        "(tile_idx_m, tile_idx_n, k_tile), (stage, phase, "
-                        "count) "
-                        "K_TILE_MAX"
-                        ": (%d, %d, %d), (%d, %d, %d)\n",
-                        tile_idx_m, tile_idx_n, k_tile,
-                        accumulator_pipe_consumer_state.index(),
-                        accumulator_pipe_consumer_state.phase(),
-                        accumulator_pipe_consumer_state.count());
+                    printf("EPILOGUE_WARPS:: Releasing accumulator pipe for "
+                           "(tile_idx_m, tile_idx_n, k_tile), (stage, phase, "
+                           "count) "
+                           "K_TILE_MAX"
+                           ": (%d, %d, %d), (%d, %d, %d)\n",
+                           tile_idx_m, tile_idx_n, k_tile,
+                           accumulator_pipe_consumer_state.index(),
+                           accumulator_pipe_consumer_state.phase(),
+                           accumulator_pipe_consumer_state.count());
                     PRINT_DELIMITER);
                     
+                // Arrive on empty_barrier
                 accumulator_pipeline.consumer_release(
                     accumulator_pipe_consumer_state);
 
