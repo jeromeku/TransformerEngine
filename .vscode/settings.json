@@ -11,6 +11,10 @@
     "editor.useEditorConfig": false,
 
     "C_Cpp.vcFormat.indent.accessSpecifiers": true,
+  // ...your existing settings...
+
+    "windsurf.marketplaceExtensionGalleryServiceURL": "https://marketplace.visualstudio.com/_apis/public/gallery",
+    "windsurf.marketplaceGalleryItemURL": "https://marketplace.visualstudio.com/items"
 
     //   "[cpp]": {
     //     "editor.tabSize": 4,

@@ -366,7 +366,7 @@ rht_gemm_device(MShape M, NShape N, KShape K, ClusterTileShape cluster_tile,
 
     tmem_allocator.allocate(TmemAllocator::Sm100TmemCapacityColumns, &shared_storage.tmem_base_ptr);
     __syncwarp();
-    // this is a bar.arrive with a reserved named barrier (TmemAllocBarrier)
+    // this is a bar.arrive with a reserved named barrier (TmemAllocBarrier) with 32 + 128 thread: MMA warp + 4 epilogue warps
     tmem_allocation_result_barrier.arrive();
     uint32_t tmem_base_ptr = shared_storage.tmem_base_ptr;
     bulk_tmem_mma.data() = tmem_base_ptr;

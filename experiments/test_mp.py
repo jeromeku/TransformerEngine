@@ -15,7 +15,7 @@ inp = torch.rand((1024, 768), dtype=high_precision_dtype, requires_grad=True).cu
 with te.autocast(enabled=True, recipe=fp8_recipe):
     out_fp8 = my_linear(inp)
 loss = out_fp8.mean()
-breakpoint()
+#breakpoint()
 loss.backward()
 
 """    

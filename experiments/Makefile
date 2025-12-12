@@ -6,6 +6,7 @@ CUTLASS_REPO_PATH = /home/jk/transformerengine/3rdparty/cutlass
 CUTLASS_HEADERS = ${CUTLASS_REPO_PATH}/include 
 CUTLASS_TOOL_HEADERS = ${CUTLASS_REPO_PATH}/tools/util/include
 CUTLASS_TEST_HEADERS = ${CUTLASS_REPO_PATH}/test/unit/common
+CUTLASS_EXAMPLE_HEADERS = ${CUTLASS_REPO_PATH}/examples/common
 CXX_FLAGS=--expt-relaxed-constexpr -std=c++17
 HOST_DEBUG_FLAGS=-g -O0
 DEBUG_FLAGS=${HOST_DEBUG_FLAGS} -G  #-lineinfo
@@ -16,12 +17,17 @@ CUDA_CODE=sm_100a
 ARCH_FLAGS=--generate-code=arch=${CUDA_ARCH},code=${CUDA_CODE}
 CUTE_DEBUG=-DDEBUG_CUTE
 
-.PHONY: all clean
+.PHONY: all clean tutorial
 
 all: clean rht_gemm
+
+tutorial: clean epilogue_tutorial
 
 rht_gemm: rht_gemm.cu
 	nvcc ${HOST_DEBUG_FLAGS} ${ARCH_FLAGS} ${CUTLASS_DEBUG_FLAG} ${CXX_FLAGS} -I${CUTLASS_HEADERS} -o $@ $<
 
+epilogue_tutorial: tutorial-05.cu
+	nvcc ${HOST_DEBUG_FLAGS} ${ARCH_FLAGS} ${CUTLASS_DEBUG_FLAG} ${CXX_FLAGS} -I${CUTLASS_HEADERS} -I${CUTLASS_TOOL_HEADERS} -I${CUTLASS_EXAMPLE_HEADERS} -o $@ $<
+
 clean:
-	rm -rf rht_gemm
+	rm -rf rht_gemm epilogue_tutorial
