@@ -259,6 +259,9 @@ def _train(opts):
     # Intialize userbuffers
     hidden_size = opts.num_heads * opts.head_dim
     batched_size = opts.seq_length * opts.batch_size
+    dist_print(f"Rank {LOCAL_RANK} pid: {os.getpid()}")
+    dist.barrier()
+
     if not opts.no_comm_overlap:
         te.module.base.initialize_ub(
             [batched_size, hidden_size],
