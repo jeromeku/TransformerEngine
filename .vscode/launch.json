@@ -1,0 +1,27 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+
+    {
+      "name": "ub debug",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "torch.distributed.run",
+      "args": [
+        "--standalone",
+        "--nnodes=1",
+        "--nproc-per-node=2",
+        "${workspaceFolder}/examples/pytorch/comm_gemm_overlap/te_layer_with_overlap.py"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "subProcess": true
+    },
+     {
+            "name": "LLDB: Attach to Process",
+            "type": "lldb",
+            "request": "attach",
+            "pid": "${command:pickProcess}"
+    }
+  ]
+}
