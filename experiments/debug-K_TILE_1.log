@@ -1,0 +1,286 @@
+Traits K
+16
+mmaK
+(_128,_16,_16)
+mma
+TiledMMA
+  ThrLayoutVMNK:  (_1,_1,_1,_1):(_0,_0,_0,_0)
+  PermutationMNK: (_,_,_)
+MMA_Atom
+  ThrID:      _1:_0
+  Shape_MNK:  (_128,_16,_16)
+  LayoutA_TV: (_1,(_128,_16)):(_0,(_1,_128))
+  LayoutB_TV: (_1,(_16,_16)):(_0,(_1,_16))
+  LayoutC_TV: (_1,(_128,_16)):(_0,(_1,_128))
+
+mma_shape_B
+((_16,_16),_1,_1)
+smemShapeM
+_128
+smemShapeN
+_16
+smemShapeK
+_16
+mma_shape_A
+((_128,_16),_1,_4)
+SmemLayoutAtomB
+Sw<1,4,3> o smem_ptr[16b](unset) o (_16,_8):(_1,_16)
+0   1   2   3   4   5   6   7   8   9   10  11  12  13  14  15  
+16  17  18  19  20  21  22  23  24  25  26  27  28  29  30  31  
+32  33  34  35  36  37  38  39  40  41  42  43  44  45  46  47  
+48  49  50  51  52  53  54  55  56  57  58  59  60  61  62  63  
+72  73  74  75  76  77  78  79  64  65  66  67  68  69  70  71  
+88  89  90  91  92  93  94  95  80  81  82  83  84  85  86  87  
+104 105 106 107 108 109 110 111 96  97  98  99  100 101 102 103 
+120 121 122 123 124 125 126 127 112 113 114 115 116 117 118 119 
+smemLayoutAtomA
+Sw<3,4,3> o smem_ptr[16b](unset) o (_64,_8):(_1,_64)
+smemLayoutAtomB_Kmajor
+Sw<1,4,3> o smem_ptr[16b](unset) o (_8,_16):(_16,_1)
+sA
+Sw<3,4,3> o smem_ptr[16b](unset) o (((_64,_2),(_8,_2)),_1,_4,(_1,_13)):(((_1,_512),(_64,_1024)),_0,_2048,(_0,_8192))
+sB
+Sw<1,4,3> o smem_ptr[16b](unset) o ((_16,_16),_1,_1,(_1,_13)):((_1,_16),_0,_0,(_0,_256))
+gA_mk
+gmem_ptr[16b](0x67259000000) o (_128,_64,2,4):(_1,128,_128,8192)
+gB_nk
+gmem_ptr[16b](0x67259020000) o (_16,_16,1,1):(_1,16,_16,256)
+Initialize TMA Load B...
+Initialize TMA Load B...
+Initialize TMA Load B...
+Initialize TMA Load B...
+Initialize TMA Load B...
+Initialize TMA Load B...
+Initialize TMA Load B...
+
+ ------------------------------------------------------------- 
+
+ ------------------------------------------------------------- 
+
+ ------------------------------------------------------------- 
+
+ ------------------------------------------------------------- 
+
+ ------------------------------------------------------------- 
+
+ ------------------------------------------------------------- 
+
+ ------------------------------------------------------------- 
+mA
+
+ ------------------------------------------------------------- 
+DMA WARP: Loading tAgA_mk(_,k_tile_idx_n)
+DMA WARP: Loading tAgA_mk(_,k_tile_idx_n)
+DMA WARP: Loading tAgA_mk(_,k_tile_idx_n)
+DMA WARP: Loading tAgA_mk(_,k_tile_idx_n)
+ArithTupleDMA WARP: Loading tAgA_mk(_,k_tile_idx_n)
+DMA WARP: Loading tAgA_mk(_,k_tile_idx_n)
+DMA WARP: Loading tAgA_mk(_,k_tile_idx_n)
+(ArithTupleArithTupleArithTupleArithTupleArithTupleArithTupleArithTuple_(((((((00000000,,,,,,,,_0000000)0)))))) o ) o  o  o  o  o  o ( o (((((((((((((((256((((((_,______642566464646464,64),,,,,_,:_____8_(88888)8_))))),)1,,,,,(,@0(((((_(,_____2__22222,2,1,,,,_,_@1____8_8)8888)8)
+)))))))mB
+)))))))ArithTuple))))::)(::::((_:((((((0(((((((,((((_(___(__1_011_1@011)@0@0@01,@0@0 o ,,,@0_,,(___,1__16111_@11,1@1@1@11)@116@1)))@1,))),,,(),:,(((_,(((___64(___6464@064_64164@0@0,@064@0@0@0,,_,@0,,,__8_,___88@18_818@1@1)@18@1@1@1))))@1)))))))))
+)))
+)))mC
+
+)
+DMA WARP: Loading tAsA(_,write_stage)
+
+
+)subptr[4b](0x67259020200.0)DMA WARP: Loading tAsA(_,write_stage)
+
+DMA WARP: Loading tAsA(_,write_stage)
+DMA WARP: Loading tAsA(_,write_stage)
+Sw<3,4,3>
+DMA WARP: Loading tAsA(_,write_stage)
+ o DMA WARP: Loading tAsA(_,write_stage)
+Sw<3,4,3>_Sw<3,4,3>DMA WARP: Loading tAsA(_,write_stage)
+(Sw<3,4,3>Sw<3,4,3>_Sw<3,4,3>smem__256__Sw<3,4,3>smem__ptr[smem_,smem_smem__ptr[smem_16ptr[256ptr[ptr[smem_16ptr[b](0x67300000580)16)1616b](0x67300000580)ptr[ o 16b](0x67300000580):b](0x67300000580)b](0x67300000580) o 16b](0x67300000580)( o ( o  o (b](0x67300000580)( o (64((( o _((,((_(512_(_512__(,512_1,512512__512,)_,,16512_,
+16__),16_)sfc_layout
+1616)_)16))():16)):)256)()):(:,:()(:(((_(:(_(((1((_1(__,_1(,_161_1,__1,,512,_5121,__)_512),_4512)512))_))512
+))
+512,))
+ ------------------------------------------------------------- 
+
+)
+ ------------------------------------------------------------- 
+)4
+)
+ ------------------------------------------------------------- 
+
+blockIdx.x, tile_idx_m, tile_idx_n, tiles_in_m, tiles_in_n, K_TILE_MAX: 1, 1, 0, 2, 4, 1
+))blockIdx.x, tile_idx_m, tile_idx_n, tiles_in_m, tiles_in_n, K_TILE_MAX: 6, 0, 3, 2, 4, 1
+
+
+ ------------------------------------------------------------- 
+
+ ------------------------------------------------------------- 
+blockIdx.x, tile_idx_m, tile_idx_n, tiles_in_m, tiles_in_n, K_TILE_MAX: 7, 1, 3, 2, 4, 1
+
+
+ ------------------------------------------------------------- 
+)
+ ------------------------------------------------------------- 
+
+ ------------------------------------------------------------- 
+blockIdx.x, tile_idx_m, tile_idx_n, tiles_in_m, tiles_in_n, K_TILE_MAX: 4, 0, 2, 2, 4, 1
+
+ ------------------------------------------------------------- 
+
+ ------------------------------------------------------------- 
+:blockIdx.x, tile_idx_m, tile_idx_n, tiles_in_m, tiles_in_n, K_TILE_MAX: 5, 1, 2, 2, 4, 1
+tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 1, 0, 4, 0, 0, 1
+tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 3, 4, 0, 3, 1
+
+ ------------------------------------------------------------- 
+blockIdx.x, tile_idx_m, tile_idx_n, tiles_in_m, tiles_in_n, K_TILE_MAX: 2, 0, 1, 2, 4, 1
+(tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 1, 3, 4, 0, 3, 1
+
+ ------------------------------------------------------------- 
+blockIdx.x, tile_idx_m, tile_idx_n, tiles_in_m, tiles_in_n, K_TILE_MAX: 3, 1, 1, 2, 4, 1
+Mainloop producer getting barrier for stage, phase, count: 0 1 0
+Mainloop producer getting barrier for stage, phase, count: 0 1 0
+
+ ------------------------------------------------------------- 
+16tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 2, 4, 0, 2, 1
+Mainloop producer getting barrier for stage, phase, count: 0 1 0
+
+ ------------------------------------------------------------- 
+tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 1, 2, 4, 0, 2, 1
+Mainloop producer acquiring arrival token for stage, phase, count: 1 1 1
+,Mainloop producer acquiring arrival token for stage, phase, count: 1 1 1
+tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 1, 4, 0, 1, 1
+Mainloop producer getting barrier for stage, phase, count: 0 1 0
+Mainloop producer acquiring arrival token for stage, phase, count: 1 1 1
+Mainloop producer getting barrier for stage, phase, count: 0 1 0
+
+ ------------------------------------------------------------- 
+(tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 1, 1, 4, 0, 1, 1
+
+ ------------------------------------------------------------- 
+Mainloop producer getting barrier for stage, phase, count: 0 1 0
+Mainloop producer acquiring arrival token for stage, phase, count: 1 1 1
+
+ ------------------------------------------------------------- 
+(Mainloop producer acquiring arrival token for stage, phase, count: 1 1 1
+Mainloop producer getting barrier for stage, phase, count: 0 1 0
+
+ ------------------------------------------------------------- 
+Mainloop producer acquiring arrival token for stage, phase, count: 1 1 1
+_
+ ------------------------------------------------------------- 
+Mainloop producer acquiring arrival token for stage, phase, count: 1 1 1
+0
+ ------------------------------------------------------------- 
+
+ ------------------------------------------------------------- 
+,_1),_4))
+
+ ------------------------------------------------------------- 
+K_TILE_MAX
+1
+K_PIPE_MAX
+13
+tiles_in_m
+2
+tiles_in_n
+4
+gA_mk
+ArithTuple(_0,_0) o (_128,_64,2,4):(_1@0,_1@1,_128@0,_64@1)
+gB_nk
+ArithTuple(_0,_0) o (_16,_16,1,1):(_1@0,_1@1,_16@0,_16@1)
+gC_mn
+subptr[4b](0x67259020200.0) o (_128,_64,2,4):(64,_1,8192,_64)
+gSFC_mn
+gmem_ptr[8b](0x67259030200) o (_128,(_16,_4),2,4):(16,(_0,_1),2048,_4)
+tCsA
+Sw<3,4,3>_smem_ptr[16b](0x67300000580) o (((_64,_2),(_8,_2)),_1,_4,(_1,_13)):(((_1,_512),(_64,_1024)),_0,_2048,(_0,_8192))
+tCsB
+Sw<1,4,3>_smem_ptr[16b](0x67300034580) o ((_16,_16),_1,_1,(_1,_13)):((_1,_16),_0,_0,(_0,_256))
+
+ ------------------------------------------------------------- 
+thr_mma
+ThrMMA
+  Thr VMNK: (_0,_0,_0,_0)
+TiledMMA
+  ThrLayoutVMNK:  (_1,_1,_1,_1):(_0,_0,_0,_0)
+  PermutationMNK: (_,_,_)
+MMA_Atom
+  ThrID:      _1:_0
+  Shape_MNK:  (_128,_16,_16)
+  LayoutA_TV: (_1,(_128,_16)):(_0,(_1,_128))
+  LayoutB_TV: (_1,(_16,_16)):(_0,(_1,_16))
+  LayoutC_TV: (_1,(_128,_16)):(_0,(_1,_128))
+
+tCgB
+ArithTuple(_0,_0) o ((_16,_16),_1,_1,1,1):((_1@0,_1@1),_0,_0,_16@0,_16@1)
+mma_epilogue
+TiledMMA
+  ThrLayoutVMNK:  (_1,_1,_1,_1):(_0,_0,_0,_0)
+  PermutationMNK: (_,_,_)
+MMA_Atom
+  ThrID:      _1:_0
+  Shape_MNK:  (_128,_64,_16)
+  LayoutA_TV: (_1,(_128,_16)):(_0,(_1,_128))
+  LayoutB_TV: (_1,(_64,_16)):(_0,(_1,_64))
+  LayoutC_TV: (_1,(_128,_64)):(_0,(_1,_128))
+
+thr_mma_epilogue
+ThrMMA
+  Thr VMNK: (_0,_0,_0,_0)
+TiledMMA
+  ThrLayoutVMNK:  (_1,_1,_1,_1):(_0,_0,_0,_0)
+  PermutationMNK: (_,_,_)
+MMA_Atom
+  ThrID:      _1:_0
+  Shape_MNK:  (_128,_64,_16)
+  LayoutA_TV: (_1,(_128,_16)):(_0,(_1,_128))
+  LayoutB_TV: (_1,(_64,_16)):(_0,(_1,_64))
+  LayoutC_TV: (_1,(_128,_64)):(_0,(_1,_128))
+
+tCgA
+ArithTuple(_0,_0) o ((_128,_16),_1,_4,2,4):((_1@0,_1@1),_0,_16@1,_128@0,_64@1)
+tCrA
+UMMA::DescriptorIterator o (_1,_1,_4,(_1,_13)):(_0,_0,_256,(_0,_1024))
+tCrB
+UMMA::DescriptorIterator o (_1,_1,_1,(_1,_13)):(_0,_0,_0,(_0,_32))
+
+ ------------------------------------------------------------- 
+acc_shape_mma
+((_128,_16),_1,_1)
+acc_shape_mma2
+((_128,_16),_1,_2)
+acc_shape_epilogue
+((_128,_64),_1,_1)
+bulk_tmem_mma
+tmem_[32b](0x0000.0000) o ((_128,_16),_1,_1,_16):((_65536,_1),_0,_0,_16)
+bulk_tmem_epilogue
+tmem_[32b](0x0000.0000) o ((_128,_64),_1,_1,_4):((_65536,_1),_0,_0,_64)
+
+ ------------------------------------------------------------- 
+tAgA
+ArithTuple(_0,_0) o (((_64,_8),(_2,_8)),2,4):(((_1@0,_1@1),(_64@0,_8@1)),_128@0,_64@1)
+tAsA
+Sw<3,4,3>_smem_ptr[16b](0x67300000580) o ((_512,_16),(_1,_13)):((_1,_512),(_0,_8192))
+tBgB
+ArithTuple(_0,_0) o (((_16,_16),_1),1,1):(((_1@0,_1@1),_0),_16@0,_16@1)
+tBsB
+ArithTuple(_0,_0) o (((_16,_16),_1),1,1):(((_1@0,_1@1),_0),_16@0,_16@1)
+AtomThrShapeMNK
+(_1,_1,_1)
+Initialize TMA Load B...
+
+ ------------------------------------------------------------- 
+DMA WARP: Loading tAgA_mk(_,k_tile_idx_n)
+ArithTuple(0,0) o (((_64,_8),(_2,_8))):(((_1@0,_1@1),(_64@0,_8@1)))
+DMA WARP: Loading tAsA(_,write_stage)
+Sw<3,4,3>_smem_ptr[16b](0x67300000580) o ((_512,_16)):((_1,_512))
+
+ ------------------------------------------------------------- 
+blockIdx.x, tile_idx_m, tile_idx_n, tiles_in_m, tiles_in_n, K_TILE_MAX: 0, 0, 0, 2, 4, 1
+
+ ------------------------------------------------------------- 
+tile_idx_m, tile_idx_n, tiles_in_n, k_tile, k_tile_idx_n,K_TILE_MAX: 0, 0, 4, 0, 0, 1
+Mainloop producer getting barrier for stage, phase, count: 0 1 0
+Mainloop producer acquiring arrival token for stage, phase, count: 1 1 1
+
+ ------------------------------------------------------------- 
