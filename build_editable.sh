@@ -12,6 +12,7 @@ set -euo pipefail
 REPO_ROOT=`realpath -L .`
 
 export CUDNN_HOME=`realpath -L .venv/lib/python3.12/site-packages/nvidia/cudnn`
+export CUDNN_PATH=`realpath -L .venv/lib/python3.12/site-packages/nvidia/cudnn`
 # export NVSHMEM_HOME=`realpath -L .venv/lib/python3.12/site-packages/nvidia/nvshmem`
 # echo $NVSHMEM_HOME
 # EXTRA_INCLUDES=" -I${REPO_ROOT}/transformer_engine/common/include"
@@ -20,13 +21,31 @@ export CUDNN_HOME=`realpath -L .venv/lib/python3.12/site-packages/nvidia/cudnn`
 
 echo $CUDNN_HOME
 echo $REPO_ROOT
+export CPATH="$CUDNN_HOME/include${CPATH:+:$CPATH}"
 
-export NVTE_BUILD_DEBUG=1
+# CMAKE Flags
+DEBUG_FLAGS="-g3 -O0"
+# export NVTE_BUILD_DEBUG=1
+# "-DCMAKE_CXX_FLAGS=${DEBUG_FLAGS}" \
+CUDA_DEBUG_FLAGS="-O0"
+export CUDAFLAGS="--Ofast-compile=max -g"
 
-export NVTE_CMAKE_EXTRA_ARGS="-DCMAKE_BUILD_TYPE=RelWithDebInfo \
--DCMAKE_VERBOSE_MAKEFILE=1 \
--DCMAKE_EXPORT_COMPILE_COMMANDS=1"
+CMAKE_EXTRA_ARGS=( -DCMAKE_VERBOSE_MAKEFILE=1 -DCMAKE_EXPORT_COMPILE_COMMANDS=1)
+CMAKE_EXTRA_ARGS+=(-DCMAKE_CUDA_FLAGS_DEBUG=${CUDA_DEBUG_FLAGS})
+# CMAKE_EXTRA_ARGS+=(-DCMAKE_CUDA_FLAGS=${CUDAFLAGS})
+CMAKE_EXTRA_ARGS+=(-DCMAKE_CUDA_FLAGS_RELEASE=${CUDA_DEBUG_FLAGS})
 
+# Easiest way is to hardcode set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O0 -g --Ofast-compile=max") in CMakeLIsts.txt
+
+export NVTE_CMAKE_EXTRA_ARGS="${CMAKE_EXTRA_ARGS[@]}"
+# export NVTE_BUILD_THREADS_PER_JOB=8
+
+export CXXFLAGS=${DEBUG_FLAGS}
+
+export CC=clang
+export CXX=clang++
+
+# TE Flags
 export NVTE_FRAMEWORK="pytorch"
 export NVTE_ENABLE_NVSHMEM=0
 export NVTE_CUDA_ARCHS="100a"

@@ -235,7 +235,7 @@ at::Tensor convert_block_scaling_to_mxfp8_tensor(transformer_engine::TensorWrapp
   // Allocate memory for swizzled mxfp8 scaling factors
   const auto options = at::TensorOptions().dtype(torch::kByte).device(torch::kCUDA);
   at::Tensor swizzled_scale_inv = at::empty(
-      std::vector<int64_t>{swizzled_scale_inv_first_dim, swizzled_scale_inv_last_dim}, options);
+      std::vector<int64_t>{static_cast<int64_t>(swizzled_scale_inv_first_dim), static_cast<int64_t>(swizzled_scale_inv_last_dim)}, options);
   // Set rowwise scaling factors on output
   void* const swizzled_scale_inv_dptr = getDataPtr(swizzled_scale_inv, 0);
   NVTEShape swizzled_scale_inv_shape{};

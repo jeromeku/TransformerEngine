@@ -85,8 +85,11 @@ def setup_common_extension() -> CMakeExtension:
 
     # Add custom CMake arguments from environment variable
     nvte_cmake_extra_args = os.getenv("NVTE_CMAKE_EXTRA_ARGS")
+    
+    import shlex
+
     if nvte_cmake_extra_args:
-        cmake_flags.extend(nvte_cmake_extra_args.split())
+        cmake_flags.extend(shlex.split(nvte_cmake_extra_args))
 
     # Project directory root
     root_path = Path(__file__).resolve().parent
