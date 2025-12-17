@@ -17,11 +17,20 @@
       "justMyCode": false,
       "subProcess": true
     },
-     {
+    {
             "name": "LLDB: Attach to Process",
             "type": "lldb",
             "request": "attach",
             "pid": "${command:pickProcess}"
-    }
+    },
+{
+    "name": "LLDB: stochastic_rounding",
+    "type": "lldb",
+    "request": "launch",
+    "program": "${workspaceFolder}/experiments/stochastic_rounding",
+    "cwd": "${workspaceFolder}/experiments",
+    "stopOnEntry": false
+}
+
   ]
 }

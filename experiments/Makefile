@@ -2,7 +2,7 @@
 # The cutlass repo is in the external directory: ../external/cutlass/include
 
 # Set the CUTLASS_REPO_PATH to the path of the cutlass repo
-CUTLASS_REPO_PATH = /home/jk/transformerengine/3rdparty/cutlass
+CUTLASS_REPO_PATH = /home/jeromeku/transformerengine/3rdparty/cutlass
 CUTLASS_HEADERS = ${CUTLASS_REPO_PATH}/include 
 CUTLASS_TOOL_HEADERS = ${CUTLASS_REPO_PATH}/tools/util/include
 CUTLASS_TEST_HEADERS = ${CUTLASS_REPO_PATH}/test/unit/common
@@ -19,9 +19,12 @@ CUTE_DEBUG=-DDEBUG_CUTE
 
 .PHONY: all clean tutorial
 
-all: clean rht_gemm
+all: clean stochastic_rounding rht_gemm
 
 tutorial: clean epilogue_tutorial
+
+stochastic_rounding: stochastic_rounding.cu
+	nvcc ${DEBUG_FLAGS} ${ARCH_FLAGS} ${CXX_FLAGS} -I${CUTLASS_HEADERS} -o $@ $<
 
 rht_gemm: rht_gemm.cu
 	nvcc ${HOST_DEBUG_FLAGS} ${ARCH_FLAGS} ${CUTLASS_DEBUG_FLAG} ${CXX_FLAGS} -I${CUTLASS_HEADERS} -o $@ $<
