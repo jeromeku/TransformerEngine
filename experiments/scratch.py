@@ -102,7 +102,7 @@ def blockwise_quantize_nvfp4(x: torch.Tensor, tile_shape: "NVFP4_TILESHAPE"):
 
     scaled_x = x.to(torch.float32) * encode_scale
 
-    clipped_x = torch.clamp(scaled_x, -FLOAT4_E2M1_MAX, FLOAT4_E2M1_MAX).reshape(m, n)
+    clipped_x = torch.clamp(scaled_x, -FLOAT4_E2M1_MAX, FLOAT4_E2M1_MAX).reshape(M, N)
 
     qx = cast_to_fp4x2(clipped_x)
     sx = decode_scale.squeeze(-1)
