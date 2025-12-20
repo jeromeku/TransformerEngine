@@ -3,6 +3,9 @@ CompileFlags:
   CompilationDatabase: build/cmake
   Add:
     - -I/home/jeromeku/transformerengine/transformer_engine/common/include
+    - -I/home/jeromeku/transformerengine/3rdparty/cutlass/include
+    - -I/home/jeromeku/transformerengine/3rdparty/cutlass/tools/util/include
+    - -I/home/jeromeku/transformerengine/3rdparty/cutlass/examples/common/
     - -I/home/jeromeku/transformerengine/transformer_engine/pytorch/csrc/extensions
     - -I/home/jeromeku/transformerengine/transformer_engine/pytorch/csrc
     - -I/home/jeromeku/transformerengine/.venv/lib/python3.12/site-packages/torch/include

@@ -1,34 +1,3 @@
-/***************************************************************************************************
- * Copyright (c) 2024 - 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: BSD-3-Clause
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice, this
- * list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- * this list of conditions and the following disclaimer in the documentation
- * and/or other materials provided with the distribution.
- *
- * 3. Neither the name of the copyright holder nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
- * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
- * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- **************************************************************************************************/
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 //
 //                             CuTe Tutorial for SM100 Programming
@@ -65,6 +34,8 @@
 #include <cute/arch/tmem_allocator_sm100.hpp>   // TMEM allocator for SM100
 
 // Tutorial helpers
+#include "cute/atom/mma_atom.hpp"
+#include "cute/atom/mma_traits.hpp"
 #include "example_utils.hpp"
 
 using namespace cute;
@@ -115,6 +86,13 @@ using namespace cute;
 // TypeC = float;            // MMA C Data Type
 // TypeD = float;            // MMA D Data Type
 // TypeAccumulator = float;  // Both TypeC and TypeD are float, so we use float accumulator type
+
+#define PRINT_CUTE(x)                              \
+  do {                                             \
+    printf("%s:\t", #x);                           \
+    cute::print(x); \
+    printf("\n");                                \
+  } while (0)
 
 #if defined(CUTLASS_ARCH_MMA_SM100_SUPPORTED)
 
@@ -245,9 +223,34 @@ gemm_device(ATensor mA,                      // (Gemm_M, Gemm_K)
   Tensor tCrA = cta_mma.make_fragment_A(tCsA);      // (MmaA, NumMma_M, NumMma_K, Tiles_K)
   Tensor tCrB = cta_mma.make_fragment_B(tCsB);      // (MmaB, NumMma_M, NumMma_K, Tiles_K)
 
+
+  if(thread0()){
+    auto tensor = cute::tensor<0>(tCsA);
+    Tensor u128_tensor = recast<uint128_t const>(tensor);
+    Layout canonical_layout = logical_divide(layout(u128_tensor), Tile<Layout<_8,_1>,Layout<_2,_1>>{});
+    uint32_t stride_00 = stride<0,0>(canonical_layout);
+    //constexpr uint32_t expected_stride_00 = SwizzleAtomMNSize; // 8
+    //static_assert(stride_00 == expected_stride_00, "Not a canonical UMMA_K Layout: Expected stride failure.");
+    uint32_t stride_10 = stride<1,0>(canonical_layout);
+    uint32_t expected_stride_10 = 1;
+    //static_assert(stride_10 == expected_stride_10, "Not a canonical UMMA_K Layout: Expected stride failure.");
+      // stride dimension byte offset and leading dimension byte offset (4LSB not included == uint128_t units)
+    constexpr uint32_t stride_01 = stride<0,1>(canonical_layout);
+
+    PRINT_CUTE(tCrA);
+    PRINT_CUTE(tensor);
+    PRINT_CUTE(u128_tensor);
+    PRINT_CUTE(canonical_layout);
+    PRINT_CUTE(stride_00);
+    PRINT_CUTE(stride_10);
+    PRINT_CUTE(stride_01);
+  }
+    // desc.stride_byte_offset_  = stride_01;
+    // desc.leading_byte_offset_ = stride_10
   // TMEM Allocation
   // On SM100 architecture, accumulators are stored exclusively in tensor memory (TMEM).
   // ThrMma's make_fragment_C() creates a TMEM tensor with the appropriate layout for the accumulator.
+#if 0
   Tensor tCtAcc = cta_mma.make_fragment_C(tCgC);    // (MmaC, NumMma_M, NumMma_N)
 
   uint32_t elect_one_thr  = cute::elect_one_sync();
@@ -461,7 +464,13 @@ gemm_device(ATensor mA,                      // (Gemm_M, Gemm_K)
     tmem_allocator.release_allocation_lock();
     tmem_allocator.free(shared_storage.tmem_base_ptr, TmemAllocator::Sm100TmemCapacityColumns);
   }
+#endif
 }
+template<typename T>
+void print_cute(const char *label, T obj){
+  print("%s\t", label); print(obj); print("\n");
+}
+
 
 template <class TypeA, class LayoutA,
           class TypeB, class LayoutB,
@@ -501,10 +510,21 @@ void gemm_host_f16xf16_f32_f32_tnt(TypeA const* device_ptr_A, LayoutA layout_A,
   // Create TiledMma. make_tiled_mma takes the target instructions and an (optional) instruction layout as parameters to create a
   // larger TiledMma from the given mma instruction.
   // See cute/arch/mma_sm100_umma.hpp for all tcgen05.mma instructions
+  using MmaOp = SM100_MMA_F16BF16_2x1SM_SS<TypeA, TypeB, TypeC,                 // Mma's A, B, and Accumulator types
+                                                                 256, 256,                            // Mma M and N dimensions
+                                                                 UMMA::Major::K, UMMA::Major::K>;
+  using MmaTraits = MMA_Traits<SM100_MMA_F16BF16_2x1SM_SS<TypeA, TypeB, TypeC,                 // Mma's A, B, and Accumulator types
+                                                                 256, 256,                            // Mma M and N dimensions
+                                                                 UMMA::Major::K, UMMA::Major::K>>;
+  auto traits = MmaTraits{};
+
+  using MmaAtom = MMA_Atom<MmaOp>;
+  
+
   TiledMMA tiled_mma = make_tiled_mma(SM100_MMA_F16BF16_2x1SM_SS<TypeA, TypeB, TypeC,                 // Mma's A, B, and Accumulator types
                                                                  256, 256,                            // Mma M and N dimensions
                                                                  UMMA::Major::K, UMMA::Major::K>{});  // A and B layouts
-
+  
   // We can also print and inspect the tiled_mma
   print(tiled_mma);
   // TiledMMA
@@ -556,16 +576,22 @@ void gemm_host_f16xf16_f32_f32_tnt(TypeA const* device_ptr_A, LayoutA layout_A,
   auto mma_shape_B = partition_shape_B(tiled_mma, make_shape(size<1>(mma_tiler), size<2>(mma_tiler)));
 
   // Print and inspect mma_shape_A, and mma_shape_B for this example.
+  
+  print_cute("mma_tiler", mma_tiler);
   print("mma_shape_A:\t"); print(mma_shape_A); print("\n");  // mma_shape_A:  ((_128,_16),_1,_4)
   print("mma_shape_B:\t"); print(mma_shape_B); print("\n");  // mma_shape_B:  ((_256,_16),_1,_4)
 
   // A and B tensors are swizzled in SMEM to improve MMA performance.
   //  * However, expressing swizzled layouts is very hard.
   //  * CuTe provides tile_to_mma_shape functions for SM100 to create swizzled layouts for post-partitioned Mma Shapes
+  using SmemLayoutA = UMMA::Layout_K_SW128_Atom<TypeA>;
+  using SmemLayoutB = UMMA::Layout_K_SW128_Atom<TypeB>;
+
   auto sA_layout = UMMA::tile_to_mma_shape(UMMA::Layout_K_SW128_Atom<TypeA>{}, mma_shape_A);
   auto sB_layout = UMMA::tile_to_mma_shape(UMMA::Layout_K_SW128_Atom<TypeB>{}, mma_shape_B);
 
   // Print and inspect sA_layout and sB_layout for this example.
+  PRINT_CUTE(SmemLayoutA{});
   print("sA_layout:\t"); print(sA_layout); print("\n");      // sA_layout:   Sw<3,4,3> o smem_ptr[16b](unset) o ((_128,_16),_1,_4):((_64,_1),_0,_16)
   print("sB_layout:\t"); print(sB_layout); print("\n");      // sB_layout:   Sw<3,4,3> o smem_ptr[16b](unset) o ((_256,_16),_1,_4):((_64,_1),_0,_16)
 
@@ -576,14 +602,16 @@ void gemm_host_f16xf16_f32_f32_tnt(TypeA const* device_ptr_A, LayoutA layout_A,
   // Pre-partitioned Tile Shape (MmaTile_M, MmaTile_N) to post-partitioned ((MmaM,MmaN), NumMma_M, NumMma_N)
   auto mma_shape_C = partition_shape_C(tiled_mma, make_shape(size<0>(mma_tiler), size<1>(mma_tiler)));
 
+  PRINT_CUTE(mma_shape_C);
   // For TMA epilogue performance it may be beneficial to iterate over the output in smaller tiles than the MMA tile
   auto epi_tiler = make_tile(size<0,0>(mma_shape_C), size<0,1>(mma_shape_C) / Int<4>{});  // 4 TMA copies per CTA per MMA tile
-
+  PRINT_CUTE(epi_tiler);
   // SMEM layouts for C and D should match the epilogue tile
+  PRINT_CUTE(UMMA::Layout_K_SW128_Atom<TypeC>{});
   auto sC_layout_mn = tile_to_shape(UMMA::Layout_K_SW128_Atom<TypeC>{}, // MMA K-major is equivalent to epilogue N-major
                                     make_shape(size<0>(epi_tiler), size<1>(epi_tiler)));
   auto sC_layout = group<0,2>(sC_layout_mn); // Group modes for tma_partition
-
+  PRINT_CUTE(sC_layout_mn);
   auto sD_layout_mn = tile_to_shape(UMMA::Layout_K_SW128_Atom<TypeD>{}, // MMA K-major is equivalent to epilogue N-major
                                     make_shape(size<0>(epi_tiler), size<1>(epi_tiler)));
   auto sD_layout = group<0,2>(sD_layout_mn); // Group modes for tma_partition
@@ -698,7 +726,7 @@ void gemm_host_f16xf16_f32_f32_tnt(TypeA const* device_ptr_A, LayoutA layout_A,
 
   printf("Grid launched: %d, %d, %d\n", dimGrid.x, dimGrid.y, dimGrid.z);
   printf("Cluster launched: %d, %d, %d\n", dimCluster.x, dimCluster.y, dimCluster.z);
-
+  
   cutlass::ClusterLaunchParams params = {dimGrid, dimBlock, dimCluster, smemBytes};
   cutlass::Status status = cutlass::launch_kernel_on_cluster(params, (void const*) kernel_ptr,
                                                              mA_tma, mB_tma, mC_tma, mD_tma,
@@ -710,6 +738,7 @@ void gemm_host_f16xf16_f32_f32_tnt(TypeA const* device_ptr_A, LayoutA layout_A,
   if (status != cutlass::Status::kSuccess) {
     std::cerr << "Error: Failed at kernel Launch" << std::endl;
   }
+
 }
 
 #endif // defined(CUTLASS_ARCH_MMA_SM100_SUPPORTED)
@@ -815,7 +844,7 @@ int main(int argc, char** argv)
   thrust::host_vector<TypeD> host_D = device_D;
   // Create a non-owning CuTe tensor for D tensor
   Tensor host_tensor_D = make_tensor(host_D.data(), layout_D);
-
+  #if 0
   ////////////////////////////////////////////////////////////
   //
   // Execute reference GEMM kernel
@@ -840,6 +869,6 @@ int main(int argc, char** argv)
 #else
   std::cout << "CUTLASS_ARCH_MMA_SM100_SUPPORTED must be enabled, but it is not. Test is waived \n" << std::endl;
 #endif
-
+#endif
   return 0;
 }

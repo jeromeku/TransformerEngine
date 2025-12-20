@@ -1,6 +1,13 @@
 {
   "version": "0.2.0",
   "configurations": [
+    {
+      "name": "Epilogue",
+      "type": "cuda-gdb",
+      "request": "launch",
+      "program": "${workspaceFolder}/experiments/bin/epilogue_tutorial"
+    },
+
 
     {
       "name": "ub debug",
