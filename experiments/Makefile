@@ -21,14 +21,15 @@ CUTLASS_ROOT     ?= /home/jeromeku/transformerengine/3rdparty/cutlass
 # -----------------------------
 BIN_DIR         ?= bin
 
-PROGRAMS        := epilogue_tutorial rht_gemm stochastic_rounding multicast_tutorial 2sm_tutorial
+PROGRAMS        := epilogue_tutorial rht_gemm stochastic_rounding multicast_tutorial 2sm_tutorial tma_test wgmma_tma_sm90
 
 SRC_epilogue_tutorial     := tutorial-05.cu
 SRC_multicast_tutorial    := multicast_tutorial.cu
 SRC_2sm_tutorial          := 2sm_tutorial.cu
 SRC_rht_gemm              := rht_gemm.cu
 SRC_stochastic_rounding   := stochastic_rounding.cu
-
+SRC_tma_test			  := tma_test.cu
+SRC_wgmma_tma_sm90        := wgmma_tma_sm90.cu
 BIN_TARGETS := $(addprefix $(BIN_DIR)/,$(PROGRAMS))
 
 # -----------------------------
@@ -154,6 +155,12 @@ $(BIN_DIR)/rht_gemm: $(SRC_rht_gemm) | $(BIN_DIR)
 
 $(BIN_DIR)/stochastic_rounding: $(SRC_stochastic_rounding) | $(BIN_DIR)
 	$(NVCC) $(NVCC_HOST) $(NVCCFLAGS) $(DEFINES) $(INCLUDES) $(call XCOMPILER,$(HOST_CXXFLAGS)) $(call XPTXAS,$(PTXASFLAGS)) -o $@ $<
+
+$(BIN_DIR)/tma_test: $(SRC_tma_test) | $(BIN_DIR)
+	$(NVCC) -G $(NVCC_HOST) $(NVCCFLAGS) $(DEFINES) $(INCLUDES) $(call XCOMPILER,$(HOST_CXXFLAGS)) $(call XPTXAS,$(PTXASFLAGS)) -o $@ $<
+
+$(BIN_DIR)/wgmma_tma_sm90: $(SRC_wgmma_tma_sm90) | $(BIN_DIR)
+	$(NVCC) -G $(NVCC_HOST) $(NVCCFLAGS) $(DEFINES) $(INCLUDES) $(call XCOMPILER,$(HOST_CXXFLAGS)) $(call XPTXAS,$(PTXASFLAGS)) -o $@ $<
 
 clean:
 	rm -rf $(BIN_DIR)

@@ -166,7 +166,7 @@ __global__ static void gemm_device(
     // int bIDx = 0;
     int clusterCol = 1;
     int ctaID = block_rank_in_cluster % 2;
-    bool clusterPair = blockX == 0 || blockX == 1;
+    bool clusterPair = blockX == 2 || blockX == 3;
     bool shouldPrint = clusterPair && blockY == clusterCol && threadIdx.x == 0 && threadIdx.y == 0;
     auto sleep = [&]() {
         if (ctaID == 1) {
