@@ -21,9 +21,11 @@ CUTLASS_ROOT     ?= /home/jeromeku/transformerengine/3rdparty/cutlass
 # -----------------------------
 BIN_DIR         ?= bin
 
-PROGRAMS        := epilogue_tutorial rht_gemm stochastic_rounding
+PROGRAMS        := epilogue_tutorial rht_gemm stochastic_rounding multicast_tutorial 2sm_tutorial
 
 SRC_epilogue_tutorial     := tutorial-05.cu
+SRC_multicast_tutorial    := multicast_tutorial.cu
+SRC_2sm_tutorial          := 2sm_tutorial.cu
 SRC_rht_gemm              := rht_gemm.cu
 SRC_stochastic_rounding   := stochastic_rounding.cu
 
@@ -139,6 +141,12 @@ $(BIN_DIR):
 # Generic rule: build each program from its mapped source
 # (Explicit per-program deps below are clearer than clever pattern magic.)
 $(BIN_DIR)/epilogue_tutorial: $(SRC_epilogue_tutorial) | $(BIN_DIR)
+	$(NVCC) $(NVCC_HOST) $(NVCCFLAGS) $(DEFINES) $(INCLUDES) $(call XCOMPILER,$(HOST_CXXFLAGS)) $(call XPTXAS,$(PTXASFLAGS)) -o $@ $<
+
+$(BIN_DIR)/multicast_tutorial: $(SRC_multicast_tutorial) | $(BIN_DIR)
+	$(NVCC) $(NVCC_HOST) $(NVCCFLAGS) $(DEFINES) $(INCLUDES) $(call XCOMPILER,$(HOST_CXXFLAGS)) $(call XPTXAS,$(PTXASFLAGS)) -o $@ $<
+
+$(BIN_DIR)/2sm_tutorial: $(SRC_2sm_tutorial) | $(BIN_DIR)
 	$(NVCC) $(NVCC_HOST) $(NVCCFLAGS) $(DEFINES) $(INCLUDES) $(call XCOMPILER,$(HOST_CXXFLAGS)) $(call XPTXAS,$(PTXASFLAGS)) -o $@ $<
 
 $(BIN_DIR)/rht_gemm: $(SRC_rht_gemm) | $(BIN_DIR)

@@ -13,6 +13,7 @@
 //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+#include <cstdint>
 #include <iostream>
 #include <cstdio>
 
@@ -36,6 +37,7 @@
 // Tutorial helpers
 #include "cute/atom/mma_atom.hpp"
 #include "cute/atom/mma_traits.hpp"
+#include "cute/layout.hpp"
 #include "example_utils.hpp"
 
 using namespace cute;
@@ -149,6 +151,40 @@ gemm_device(ATensor mA,                      // (Gemm_M, Gemm_K)
             CUTE_GRID_CONSTANT TmaAtomD const tma_atom_D,
             Alpha alpha, Beta beta)
 {
+  auto blockX = blockIdx.x;
+  auto blockY = blockIdx.y;
+  auto blockIdCluster = cute::block_id_in_cluster();
+  auto block_rank_in_cluster = cute::block_rank_in_cluster();
+  auto clusterShape = cute::cluster_shape();
+  auto numThreads = blockDim.x * blockDim.y;
+  auto clusterGridDims = cute::cluster_grid_dims();
+  auto clusterID = cute::cluster_id_in_grid();
+  constexpr uint32_t DELAY = 500000000; // .5s
+
+  // int bIDx = 0;
+  int clusterCol = 1;
+  int ctaID = block_rank_in_cluster % 2;
+  bool clusterPair = blockX == 0 || blockX == 1; 
+  bool shouldPrint = clusterPair && blockY == clusterCol && threadIdx.x == 0 && threadIdx.y == 0; 
+  auto sleep = [&]() {
+    if(ctaID == 1) {
+      for(int i = 0; i < 100; i++)
+        __nanosleep(DELAY);
+    }
+  };
+
+  if(shouldPrint){
+    sleep();
+    printf("BlockID: (%d, %d)\n", blockX, blockY);
+    PRINT_CUTE(numThreads);
+    PRINT_CUTE(clusterShape);
+    PRINT_CUTE(clusterGridDims);
+    PRINT_CUTE(clusterID);
+    PRINT_CUTE(blockIdCluster);
+    PRINT_CUTE(block_rank_in_cluster);  
+  }
+  __syncthreads();
+  
   // Step 1: The Prologue.
 
   // The CTA layout within the Cluster: (V,M,N,K) -> CTA idx
@@ -174,7 +210,13 @@ gemm_device(ATensor mA,                      // (Gemm_M, Gemm_K)
   Tensor gC = local_tile(mC, mma_tiler, mma_coord, Step<_1,_1, X>{});  // (MmaTile_M, MmaTile_N)
   Tensor gD = local_tile(mD, mma_tiler, mma_coord, Step<_1,_1, X>{});  // (MmaTile_M, MmaTile_N)
 
-  if (thread0()) {
+  if (shouldPrint) {
+    sleep();
+    printf("BlockID: (%d, %d)\n", blockX, blockY);
+    PRINT_CUTE(cluster_layout_vmnk);
+    PRINT_CUTE(mma_coord_vmnk);
+    PRINT_CUTE(mma_coord);
+    PRINT_CUTE(mma_tiler);
     print("mA:\t"); print(mA); print("\n");   // mA:   ArithTuple(_0,_0) o (512,256):(_1@1,_1@0)
     print("mB:\t"); print(mB); print("\n");   // mB:   ArithTuple(_0,_0) o (1024,256):(_1@1,_1@0)
     print("mC:\t"); print(mC); print("\n");   // mC:   gmem_ptr[32b](GMEM_ADDR_C) o (512,1024):(1024,_1)
@@ -199,7 +241,7 @@ gemm_device(ATensor mA,                      // (Gemm_M, Gemm_K)
   //
   // Mma partitioning for A and B
   //
-
+    
   auto mma_v = get<0>(mma_coord_vmnk);
   ThrMMA cta_mma = tiled_mma.get_slice(mma_v);   // Use Peer CTA coordinate
   Tensor tCgA = cta_mma.partition_A(gA);         // (MmaA, NumMma_M, NumMma_K, Tiles_K)
@@ -207,7 +249,10 @@ gemm_device(ATensor mA,                      // (Gemm_M, Gemm_K)
   Tensor tCgC = cta_mma.partition_C(gC);         // (MmaC, NumMma_M, NumMma_N)
   Tensor tCgD = cta_mma.partition_C(gD);         // (MmaC, NumMma_M, NumMma_N)
 
-  if (thread0()) {
+  if (shouldPrint) {
+    sleep();
+    printf("BlockID: (%d, %d)\n", blockX, blockY);
+    PRINT_CUTE(cta_mma);
     print("tCgA:\t"); print(tCgA); print("\n");  // tCgA:   ArithTuple(_0,0) o ((_128,_16),_1,_4,4):((_1@1,_1@0),_0,_16@0,_64@0)
     print("tCgB:\t"); print(tCgB); print("\n");  // tCgB:   ArithTuple(_0,0) o ((_256,_16),_1,_4,4):((_1@1,_1@0),_0,_16@0,_64@0)
     print("tCgC:\t"); print(tCgC); print("\n");  // tCgC:   gmem_ptr[32b](GMEM_ADDR_C + offset_for_mma_tile + offset_for_mma) o ((_128,_256),_1,_1):((256,_1),_0,_0)
@@ -224,33 +269,34 @@ gemm_device(ATensor mA,                      // (Gemm_M, Gemm_K)
   Tensor tCrB = cta_mma.make_fragment_B(tCsB);      // (MmaB, NumMma_M, NumMma_K, Tiles_K)
 
 
-  if(thread0()){
-    auto tensor = cute::tensor<0>(tCsA);
-    Tensor u128_tensor = recast<uint128_t const>(tensor);
-    Layout canonical_layout = logical_divide(layout(u128_tensor), Tile<Layout<_8,_1>,Layout<_2,_1>>{});
-    uint32_t stride_00 = stride<0,0>(canonical_layout);
-    //constexpr uint32_t expected_stride_00 = SwizzleAtomMNSize; // 8
-    //static_assert(stride_00 == expected_stride_00, "Not a canonical UMMA_K Layout: Expected stride failure.");
-    uint32_t stride_10 = stride<1,0>(canonical_layout);
-    uint32_t expected_stride_10 = 1;
-    //static_assert(stride_10 == expected_stride_10, "Not a canonical UMMA_K Layout: Expected stride failure.");
-      // stride dimension byte offset and leading dimension byte offset (4LSB not included == uint128_t units)
-    constexpr uint32_t stride_01 = stride<0,1>(canonical_layout);
+  // if(shouldPrint){
+  //   sleep()
+  //   auto tensor = cute::tensor<0>(tCsA);
+  //   Tensor u128_tensor = recast<uint128_t const>(tensor);
+  //   Layout canonical_layout = logical_divide(layout(u128_tensor), Tile<Layout<_8,_1>,Layout<_2,_1>>{});
+  //   uint32_t stride_00 = stride<0,0>(canonical_layout);
+  //   //constexpr uint32_t expected_stride_00 = SwizzleAtomMNSize; // 8
+  //   //static_assert(stride_00 == expected_stride_00, "Not a canonical UMMA_K Layout: Expected stride failure.");
+  //   uint32_t stride_10 = stride<1,0>(canonical_layout);
+  //   uint32_t expected_stride_10 = 1;
+  //   //static_assert(stride_10 == expected_stride_10, "Not a canonical UMMA_K Layout: Expected stride failure.");
+  //     // stride dimension byte offset and leading dimension byte offset (4LSB not included == uint128_t units)
+  //   constexpr uint32_t stride_01 = stride<0,1>(canonical_layout);
 
-    PRINT_CUTE(tCrA);
-    PRINT_CUTE(tensor);
-    PRINT_CUTE(u128_tensor);
-    PRINT_CUTE(canonical_layout);
-    PRINT_CUTE(stride_00);
-    PRINT_CUTE(stride_10);
-    PRINT_CUTE(stride_01);
-  }
+  //   PRINT_CUTE(tCrA);
+  //   PRINT_CUTE(tensor);
+  //   PRINT_CUTE(u128_tensor);
+  //   PRINT_CUTE(canonical_layout);
+  //   PRINT_CUTE(stride_00);
+  //   PRINT_CUTE(stride_10); // 1
+  //   PRINT_CUTE(stride_01); // 64
+  // }
     // desc.stride_byte_offset_  = stride_01;
     // desc.leading_byte_offset_ = stride_10
+
   // TMEM Allocation
   // On SM100 architecture, accumulators are stored exclusively in tensor memory (TMEM).
   // ThrMma's make_fragment_C() creates a TMEM tensor with the appropriate layout for the accumulator.
-#if 0
   Tensor tCtAcc = cta_mma.make_fragment_C(tCgC);    // (MmaC, NumMma_M, NumMma_N)
 
   uint32_t elect_one_thr  = cute::elect_one_sync();
@@ -265,7 +311,7 @@ gemm_device(ATensor mA,                      // (Gemm_M, Gemm_K)
   __syncthreads(); // Wait for all threads until warp0 allocates TMEM
   tCtAcc.data() = shared_storage.tmem_base_ptr;
 
-  if (thread0()) {
+  if (shouldPrint) {
     print("tCsA:\t"); print(tCsA); print("\n");     // tCsA:   Sw<3,4,3>_smem_ptr[16b](SMEM_ADDR_A) o ((_128,_16),_1,_4):((_64,_1),_0,_16)
     print("tCsB:\t"); print(tCsB); print("\n");     // tCsB:   Sw<3,4,3>_smem_ptr[16b](SMEM_ADDR_B) o ((_256,_16),_1,_4):((_64,_1),_0,_16)
     print("tCrA:\t"); print(tCrA); print("\n");     // tCrA:   UMMA::DescriptorIterator o (_1,_1,_4):(_0,_0,_2)
@@ -319,7 +365,7 @@ gemm_device(ATensor mA,                      // (Gemm_M, Gemm_K)
   int tma_transaction_bytes = size<0>(cluster_layout_vmnk) * sizeof(make_tensor_like(tAsA))
                             + size<0>(cluster_layout_vmnk) * sizeof(make_tensor_like(tBsB));
 
-  if (thread0()) {
+  if (shouldPrint) {
     print("tAgA:\t"); print(tAgA); print("\n");  // tAgA:   ArithTuple(_0,0) o (((_64,_128),_1),4):(((_1@0,_1@1),_0),_64@0)
     print("tAsA:\t"); print(tAsA); print("\n");  // tAsA:   Sw<3,4,3>_smem_ptr[16b](SMEM_ADDR_A) o ((_8192,_1)):((_1,_0))
     print("tBgB:\t"); print(tBgB); print("\n");  // tBgB:   ArithTuple(_0,0) o (((_64,_256),_1),4):(((_1@0,_1@1),_0),_64@0)
@@ -644,6 +690,28 @@ void gemm_host_f16xf16_f32_f32_tnt(TypeA const* device_ptr_A, LayoutA layout_A,
                                       //   We have make_tma_atom_[A|B]_sm100 and which determines the multicast mode.
   Tensor mA_tma = tma_atom_A.get_tma_tensor(shape(mA));   // (Gemm_M, Gemm_K)
 
+  // Keep only MK modes from MNK
+  auto mma_tiler_mk = remove<1>(mma_tiler);
+
+  // cluster tile coord -> gtensor coord
+  //cute::composition(make_identity_layout(shape(mA)), mma_tiler_mk)
+  PRINT_CUTE(is_tuple<decltype(mma_tiler_mk)>::value);
+  auto g_tile = make_identity_layout(shape(mA)).compose(mma_tiler_mk);         // (TILE_M, TILE_K, ...)
+ 
+  PRINT_CUTE(make_identity_layout(shape(mA)));
+  // cta val idx -> gmem mode
+  auto cta_v_tile = layout<1>(tiled_mma.thrfrg_A(g_tile))(_, repeat<rank(g_tile)>(_));    // (MMA, MMA_M, MMA_K, ...)
+
+  PRINT_CUTE(tiled_mma.thrfrg_A(g_tile));
+  PRINT_CUTE(repeat<rank(g_tile)>(_));
+#if 1
+  print("(tma_a) slayout:      "); print(sA_layout);      print("\n");
+  print("(tma_a) mma_tiler_nk: "); print(mma_tiler_mk); print("\n");
+  print("(tma_a) g_tile:       "); print(g_tile);       print("\n");
+  print("(tma_a) mma_tiler:    "); print(mma_tiler);    print("\n");
+  print("(tma_a) cta_v_tile:   "); print(cta_v_tile);   print("\n");
+#endif
+
   print("tma_atom_A:\t"); print(tma_atom_A); print("\n");
   // tma_atom_A:     Copy_Atom
   //  ThrID:        _2:_1
@@ -866,8 +934,6 @@ int main(int argc, char** argv)
                                                                        type_str_d, host_tensor_D, host_reference_tensor_D);
   bool success = relative_error <= 0.0;
   std::cout << "Execution is " << ((success) ? "successful." : "failed.") << std::endl;
-#else
-  std::cout << "CUTLASS_ARCH_MMA_SM100_SUPPORTED must be enabled, but it is not. Test is waived \n" << std::endl;
 #endif
 #endif
   return 0;
