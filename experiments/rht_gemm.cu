@@ -29,7 +29,7 @@ using namespace cute;
 
 template <typename T>
 __host__ __device__ void print_cute(const char* msg, T obj) {
-    printf("%s\n", msg);
+    printf("%s:\t", msg);
     cute::print(obj);
     printf("\n");
 }
