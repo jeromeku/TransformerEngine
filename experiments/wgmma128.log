@@ -1,5 +1,5 @@
 atomA:	Sw<3,4,3> o smem_ptr[16b](unset) o (_8,_64):(_64,_1)
-gtensor         : ptr[16b](0x7f2fa7000000) o (128,128):(128,_1)
+gtensor         : ptr[16b](0x7fdee5000000) o (128,128):(128,_1)
 slayout         : ((_8,_16),(_64,_2)):((_64,_512),(_1,_8192))
 cta_v_map       : (_128,_128):(_1@0,_1@1)
 inv_smem_layout : (_64,_128,_2):(_128,_1,_8192)
@@ -14,10 +14,10 @@ tma_gbasis   : (_64,_128):(_1@1,_1@0)
 num_multicast: 1
 BEFORE smem_box_shape: 1 128
 AFTER smem_box_shape: 1 128
-TMA Desc Addr:   0x7ffeb3b3aac0
+TMA Desc Addr:   0x7ffd0441ee00
 format         6
 dim            2
-gmem_address   0x7f2fa7000000
+gmem_address   0x7fdee5000000
 globalDim      (128,128,1,1,1)
 globalStrides  (2,256,0,0,0)
 boxDim         (64,128,1,1,1)
@@ -28,7 +28,7 @@ l2Promotion    2
 oobFill        0
 num_bits_per_tma :  131072
 g_stride_bases   :  (_1@1,_1@0)
-gtensor         : ptr[16b](0x7f2fa7008000) o (128,128):(128,_1)
+gtensor         : ptr[16b](0x7fdee5008000) o (128,128):(128,_1)
 slayout         : ((_8,_16),(_64,_2)):((_64,_512),(_1,_8192))
 cta_v_map       : (_128,_128):(_1@0,_1@1)
 inv_smem_layout : (_64,_128,_2):(_128,_1,_8192)
@@ -43,10 +43,10 @@ tma_gbasis   : (_64,_128):(_1@1,_1@0)
 num_multicast: 1
 BEFORE smem_box_shape: 1 128
 AFTER smem_box_shape: 1 128
-TMA Desc Addr:   0x7ffeb3b3aac0
+TMA Desc Addr:   0x7ffd0441ee00
 format         6
 dim            2
-gmem_address   0x7f2fa7008000
+gmem_address   0x7fdee5008000
 globalDim      (128,128,1,1,1)
 globalStrides  (2,256,0,0,0)
 boxDim         (64,128,1,1,1)
@@ -65,9 +65,9 @@ g_stride_bases   :  (_1@1,_1@0)
 
 mA:	ArithTuple(_0,_0) o (128,128):(_1@1,_1@0)
 gA:	ArithTuple(_0,0) o (_128,_128,1):(_1@1,_1@0,_128@0)
-sA:	Sw<3,4,3>_smem_ptr[16b](0x7f3000000400) o ((_8,_16),(_64,_2),(_1,_1)):((_64,_512),(_1,_8192),(_0,_0))
+sA:	Sw<3,4,3>_smem_ptr[16b](0x7fe000000400) o ((_8,_16),(_64,_2),(_1,_1)):((_64,_512),(_1,_8192),(_0,_0))
 tAgA:	ArithTuple(_0,0) o (((_64,_128),_2),1):(((_1@0,_1@1),_64@0),_128@0)
-tAsA:	Sw<3,4,3>_smem_ptr[16b](0x7f3000000400) o ((_8192,_2),(_1,_1)):((_1,_8192),(_0,_0))
+tAsA:	Sw<3,4,3>_smem_ptr[16b](0x7fe000000400) o ((_8192,_2),(_1,_1)):((_1,_8192),(_0,_0))
 K_PIPE_MAX:	_1
 k_tile_count:	1
 AFTER TMA: tAsA:
@@ -343,12 +343,13 @@ MMA_Atom
   LayoutB_TV: (_128,(_64,_16)):(_0,(_1,_64))
   LayoutC_TV: ((_4,_8,_4),(_2,_2,_8)):((_128,_1,_16),(_64,_8,_512))
 
-tCsA:	Sw<3,4,3>_smem_ptr[16b](0x7f3000000400) o ((_64,_16),_2,(_4,_2),(_1,_1)):((_64,_1),_4096,(_16,_8192),(_0,_0))
+tCsA:	Sw<3,4,3>_smem_ptr[16b](0x7fe000000400) o ((_64,_16),_2,(_4,_2),(_1,_1)):((_64,_1),_4096,(_16,_8192),(_0,_0))
 W:	8
-u128_tensor:	Sw<3,4,3>_smem_ptr[128b](0x7f3000000400) o ((_64,_2),_2,(_4,_2),(_1,_1)):((_8,_1),_512,(_2,_1024),(_0,_0))
+u128_tensor:	Sw<3,4,3>_smem_ptr[128b](0x7fe000000400) o ((_64,_2),_2,(_4,_2),(_1,_1)):((_8,_1),_512,(_2,_1024),(_0,_0))
 canonical_layout:	((_8,(_8,_2)),(_2,_1),(_4,_2),(_1,_1)):((_8,(_64,_1)),(_512,_0),(_2,_1024),(_0,_0))
 /home/jeromeku/transformerengine/3rdparty/cutlass/include/cute/atom/mma_traits_sm90_gmma.hpp:291:
-u128tensor:	Sw<3,4,3>_smem_ptr[128b](0x7f3000000400) o (_64,_2):(_8,_1)
+tensor:	Sw<3,4,3>_smem_ptr[16b](0x7fe000000400) o (_64,_16):(_64,_1)
+u128tensor:	Sw<3,4,3>_smem_ptr[128b](0x7fe000000400) o (_64,_2):(_8,_1)
 canonical_layout:	((_8,_8),(_2,_1)):((_8,_64),(_1,_0))
 stride_01(SBO): 64
 stride_10(LBO): 1

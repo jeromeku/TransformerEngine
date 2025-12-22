@@ -231,8 +231,20 @@ __global__ static __launch_bounds__(decltype(size(TiledMma{}))::value) void gemm
     PRINT_CUTE(u128_tensor);
     PRINT_CUTE(canonical_layout);
 
+    // TMA copies in 8 x 64 fp16 chunks (or 8 x 8 in normalized 128b units). we can see this in the wgmma128.log, where 8 x 64 **logical** tiles are copied end to end (col major order)
+    // WGMMA expects smem layout to be described in canonical layouts
+    // For K-major 128B swizzle, these atoms are 8 x 2 in units of 128b (8 fp16).
+    // The descriptor requires an SBO and LBO to be able to determine the strides between these atoms
+    // Since TMA copies 8 x 64 where 64 elements are contiguous
+    // a WGMMA instructions such as 64 x 16 for Operand A would require 8 of these tiles and 2 of these normalized cols from SMEM
+    // So it needs to know the row stride between each smem tile (SBO) which is 8 x 8 in normalized units and a col stride of 1  
+    // in make_fragment_A, the canonical layout does NOT depend on the shape of sA, but only on the shape of the WGMMA instruction
+    // This is because of the tiling pattern of the TMA copy.  I.e., a 128 x 64 smemA vs a 128 x 128 would have the same SBO and LBO
+    // the only difference is more 8 x 8 normalized unit tiles in the K direction.  The strides between row tiles and col units remains the same.
+
     Tensor tCrA = thr_mma.make_fragment_A(tCsA);                         // (MMA,MMA_M,MMA_K,PIPE)
     PRINT_CUTE(tCrA);
+
     // Tensor tCrB = thr_mma.make_fragment_B(tCsB);                         // (MMA,MMA_N,MMA_K,PIPE)
     // PRINT_CUTE(tCrA(_,_,_,0));
     //
