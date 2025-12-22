@@ -241,10 +241,19 @@ __global__ static __launch_bounds__(decltype(size(TiledMma{}))::value) void gemm
     // in make_fragment_A, the canonical layout does NOT depend on the shape of sA, but only on the shape of the WGMMA instruction
     // This is because of the tiling pattern of the TMA copy.  I.e., a 128 x 64 smemA vs a 128 x 128 would have the same SBO and LBO
     // the only difference is more 8 x 8 normalized unit tiles in the K direction.  The strides between row tiles and col units remains the same.
+// Canonical layout for 128b K-major swizzle: ((8,m),(T,2k)):((8T,SBO),(1,T))
+// SBO = stride_off << 4 = 64 << 4 = 64 * 16
+//  8 x 64 * 2 = 8 x 64 is a smem tile, distance between tiles in **byte** is 8 x 64 * 2 = SBO.
+// This is then right shifted by 4 to obtain the stride_off  
 
     Tensor tCrA = thr_mma.make_fragment_A(tCsA);                         // (MMA,MMA_M,MMA_K,PIPE)
+    PRINT_CUTE(sA);
+    PRINT_CUTE(tCsA);
     PRINT_CUTE(tCrA);
-
+    auto descriptor = tCrA(_,_,_,0);
+    auto gmma_descriptor = descriptor[0];
+    PRINT_CUTE(descriptor);
+    PRINT_CUTE(gmma_descriptor);
     // Tensor tCrB = thr_mma.make_fragment_B(tCsB);                         // (MMA,MMA_N,MMA_K,PIPE)
     // PRINT_CUTE(tCrA(_,_,_,0));
     //
