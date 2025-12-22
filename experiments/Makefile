@@ -160,7 +160,7 @@ $(BIN_DIR)/tma_test: $(SRC_tma_test) | $(BIN_DIR)
 	$(NVCC) -G $(NVCC_HOST) $(NVCCFLAGS) $(DEFINES) $(INCLUDES) $(call XCOMPILER,$(HOST_CXXFLAGS)) $(call XPTXAS,$(PTXASFLAGS)) -o $@ $<
 
 $(BIN_DIR)/wgmma_tma_sm90: $(SRC_wgmma_tma_sm90) | $(BIN_DIR)
-	$(NVCC) -G $(NVCC_HOST) $(NVCCFLAGS) $(DEFINES) $(INCLUDES) $(call XCOMPILER,$(HOST_CXXFLAGS)) $(call XPTXAS,$(PTXASFLAGS)) -o $@ $<
+	$(NVCC) $(NVCC_HOST) $(NVCCFLAGS) $(DEFINES) $(INCLUDES) $(call XCOMPILER,$(HOST_CXXFLAGS)) $(call XPTXAS,$(PTXASFLAGS)) -o $@ $<
 
 clean:
 	rm -rf $(BIN_DIR)

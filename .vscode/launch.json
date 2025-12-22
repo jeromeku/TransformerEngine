@@ -2,10 +2,13 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "CUDA C++: Launch",
+      "name": "WGMMA_SM90",
       "type": "cuda-gdb",
       "request": "launch",
-      "program": "${workspaceFolder}/experiments/bin/tma_test"
+      "program": "${workspaceFolder}/experiments/bin/wgmma_tma_sm90",
+      "breakOnLaunch": true,
+      "stopAtEntry": true,
+      "debuggerPath": "/home/jeromeku/cuda/bin/cuda-gdb"
     },
     {
       "name": "Epilogue",
