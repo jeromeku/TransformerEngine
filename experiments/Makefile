@@ -21,15 +21,11 @@ CUTLASS_ROOT     ?= /home/jeromeku/transformerengine/3rdparty/cutlass
 # -----------------------------
 BIN_DIR         ?= bin
 
-PROGRAMS        := epilogue_tutorial rht_gemm stochastic_rounding multicast_tutorial 2sm_tutorial tma_test wgmma_tma_sm90
+PROGRAMS        := rht_gemm stochastic_rounding
 
-SRC_epilogue_tutorial     := tutorial-05.cu
-SRC_multicast_tutorial    := multicast_tutorial.cu
-SRC_2sm_tutorial          := 2sm_tutorial.cu
 SRC_rht_gemm              := rht_gemm.cu
 SRC_stochastic_rounding   := stochastic_rounding.cu
-SRC_tma_test			  := tma_test.cu
-SRC_wgmma_tma_sm90        := wgmma_tma_sm90.cu
+
 BIN_TARGETS := $(addprefix $(BIN_DIR)/,$(PROGRAMS))
 
 # -----------------------------
@@ -141,25 +137,10 @@ $(BIN_DIR):
 
 # Generic rule: build each program from its mapped source
 # (Explicit per-program deps below are clearer than clever pattern magic.)
-$(BIN_DIR)/epilogue_tutorial: $(SRC_epilogue_tutorial) | $(BIN_DIR)
-	$(NVCC) $(NVCC_HOST) $(NVCCFLAGS) $(DEFINES) $(INCLUDES) $(call XCOMPILER,$(HOST_CXXFLAGS)) $(call XPTXAS,$(PTXASFLAGS)) -o $@ $<
-
-$(BIN_DIR)/multicast_tutorial: $(SRC_multicast_tutorial) | $(BIN_DIR)
-	$(NVCC) $(NVCC_HOST) $(NVCCFLAGS) $(DEFINES) $(INCLUDES) $(call XCOMPILER,$(HOST_CXXFLAGS)) $(call XPTXAS,$(PTXASFLAGS)) -o $@ $<
-
-$(BIN_DIR)/2sm_tutorial: $(SRC_2sm_tutorial) | $(BIN_DIR)
-	$(NVCC) $(NVCC_HOST) $(NVCCFLAGS) $(DEFINES) $(INCLUDES) $(call XCOMPILER,$(HOST_CXXFLAGS)) $(call XPTXAS,$(PTXASFLAGS)) -o $@ $<
-
 $(BIN_DIR)/rht_gemm: $(SRC_rht_gemm) | $(BIN_DIR)
 	$(NVCC) $(NVCC_HOST) $(NVCCFLAGS) $(DEFINES) $(INCLUDES) $(call XCOMPILER,$(HOST_CXXFLAGS)) $(call XPTXAS,$(PTXASFLAGS)) -o $@ $<
 
 $(BIN_DIR)/stochastic_rounding: $(SRC_stochastic_rounding) | $(BIN_DIR)
-	$(NVCC) $(NVCC_HOST) $(NVCCFLAGS) $(DEFINES) $(INCLUDES) $(call XCOMPILER,$(HOST_CXXFLAGS)) $(call XPTXAS,$(PTXASFLAGS)) -o $@ $<
-
-$(BIN_DIR)/tma_test: $(SRC_tma_test) | $(BIN_DIR)
-	$(NVCC) -G $(NVCC_HOST) $(NVCCFLAGS) $(DEFINES) $(INCLUDES) $(call XCOMPILER,$(HOST_CXXFLAGS)) $(call XPTXAS,$(PTXASFLAGS)) -o $@ $<
-
-$(BIN_DIR)/wgmma_tma_sm90: $(SRC_wgmma_tma_sm90) | $(BIN_DIR)
 	$(NVCC) $(NVCC_HOST) $(NVCCFLAGS) $(DEFINES) $(INCLUDES) $(call XCOMPILER,$(HOST_CXXFLAGS)) $(call XPTXAS,$(PTXASFLAGS)) -o $@ $<
 
 clean:
