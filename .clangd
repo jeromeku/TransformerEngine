@@ -3,6 +3,7 @@ CompileFlags:
   CompilationDatabase: build/cmake
   Add:
     - -I/home/jeromeku/transformerengine/transformer_engine/common/include
+        - -I/home/jeromeku/transformerengine/transformer_engine/nvfp4_standalone_test
     - -I/home/jeromeku/transformerengine/3rdparty/cutlass/include
     - -I/home/jeromeku/transformerengine/3rdparty/cutlass/tools/util/include
     - -I/home/jeromeku/transformerengine/3rdparty/cutlass/examples/common/

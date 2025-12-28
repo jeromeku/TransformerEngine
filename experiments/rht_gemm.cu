@@ -14,6 +14,7 @@
 #include "cutlass/arch/barrier.h"
 #include "cutlass/cutlass.h"
 #include "cutlass/gemm/collective/builders/sm100_common.inl"
+#include "cutlass/half.h"
 #include "cutlass/numeric_conversion.h"
 #include "cutlass/pipeline/pipeline.hpp"
 #include "debug.hpp"
@@ -189,6 +190,8 @@ __global__ static void rht_gemm_device(MShape M, NShape N, KShape K, ClusterTile
                               sBlayout);  // (MMA,MMA_N,MMA_K,PIPE)
     if (thread0()) {
         PRINT_DELIMITER
+        print_cute("TmaTransactionBytes", kTmaTransactionBytes);
+        print_cute("TmaRHTBytes", kTmaRhtTensorTransactionBytes);
         print_cute("K_TILE_MAX", K_TILE_MAX);
         print_cute("K_PIPE_MAX", K_PIPE_MAX);
         print_cute("tiles_in_m", tiles_in_m);
@@ -239,6 +242,13 @@ __global__ static void rht_gemm_device(MShape M, NShape N, KShape K, ClusterTile
 
     auto bulk_tmem_epilogue = TiledMmaEpilogue::make_fragment_C(
         append(acc_shape_epilogue, Int<AccumulatorPipelineStageCount / 4>{}));
+    using DT = cutlass::half_t;
+    using DP_ = cute::constant<int32_t, shiftl((1 << 16), tmem_ptr<DT>::OffsetShift)>;
+    auto dp = DP_{}; // 65536 = 1 << 16 if float, 131K for half
+    auto tr = trait_ratio(sizeof_bits<uint32_t>{}, sizeof_bits<DT>{});
+    // tmem_restride = (128, 16384):(65536, 1) for float, (128, 16364):(131K, 2) for half_t
+    auto bm = bulk_tmem_mma(_, _, _, 0);
+
     if (thread0()) {
         PRINT_DELIMITER
         print_cute("acc_shape_mma", acc_shape_mma);
@@ -246,6 +256,7 @@ __global__ static void rht_gemm_device(MShape M, NShape N, KShape K, ClusterTile
         print_cute("acc_shape_epilogue", acc_shape_epilogue);
         print_cute("bulk_tmem_mma", bulk_tmem_mma);
         print_cute("bulk_tmem_epilogue", bulk_tmem_epilogue);
+        print_cute("bulk_tmem_mma(_,_,_, 0)", bm);
     }
     TmemAllocator tmem_allocator{};
     cutlass::arch::NamedBarrier tmem_allocation_result_barrier(
@@ -1009,6 +1020,8 @@ int main() {
     Tensor gA_mk = local_tile(mA, mainloop_tiler, make_coord(_, _, _), Step<_1, X, _1>{});
     Tensor gB_nk =
         local_tile(mB, cluster_tile, make_coord(_, _, _), Step<X, _1, _1>{});  // (BLK_N,BLK_K,k)
+   
+    auto t = tma_load_a.get_tma_tensor(Shape<_M, _N>{});
     print_cute("gA_mk", gA_mk);
     print_cute("gB_nk", gB_nk);
     // Tensor gC_mn = local_tile(mC, epilogue_tiler, make_coord(_,_, _),
