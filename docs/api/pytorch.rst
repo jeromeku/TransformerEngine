@@ -1,5 +1,5 @@
 ..
-    Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+    Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
     See LICENSE for license information.
 
@@ -48,6 +48,10 @@ PyTorch
 .. autoapifunction:: transformer_engine.pytorch.make_graphed_callables
 
 .. autoapifunction:: transformer_engine.pytorch.get_cpu_offload_context
+
+.. autoapifunction:: transformer_engine.pytorch.mark_not_offload
+
+.. autoapiclass:: transformer_engine.pytorch.ManualOffloadSynchronizer
 
 .. autoapifunction:: transformer_engine.pytorch.parallel_cross_entropy
 
@@ -142,6 +146,88 @@ Tensor saving and restoring functions
 .. autoapifunction:: transformer_engine.pytorch.prepare_for_saving
 
 .. autoapifunction:: transformer_engine.pytorch.restore_from_saved
+
+Operation fuser
+---------------
+
+.. autoapiclass:: transformer_engine.pytorch.ops.Sequential
+   :members: forward
+
+.. autoapiclass:: transformer_engine.pytorch.ops.FusibleOperation
+   :members: fuser_forward, fuser_backward
+
+.. autoapiclass:: transformer_engine.pytorch.ops.BasicOperation
+   :members: op_forward, op_backward
+
+.. autoapiclass:: transformer_engine.pytorch.ops.FusedOperation
+   :members: fuser_forward, fuser_backward
+
+.. autoapifunction:: transformer_engine.pytorch.ops.register_forward_fusion
+
+.. autoapifunction:: transformer_engine.pytorch.ops.register_backward_fusion
+
+.. autoapiclass:: transformer_engine.pytorch.ops.Linear
+
+.. autoapiclass:: transformer_engine.pytorch.ops.AddExtraInput
+
+.. autoapiclass:: transformer_engine.pytorch.ops.AllGather
+
+.. autoapiclass:: transformer_engine.pytorch.ops.AllReduce
+
+.. autoapiclass:: transformer_engine.pytorch.ops.BasicLinear
+   :members: _functional_forward, _functional_backward
+
+.. autoapiclass:: transformer_engine.pytorch.ops.Bias
+
+.. autoapiclass:: transformer_engine.pytorch.ops.ClampedSwiGLU
+
+.. autoapiclass:: transformer_engine.pytorch.ops.ConstantScale
+
+.. autoapiclass:: transformer_engine.pytorch.ops.Dropout
+
+.. autoapiclass:: transformer_engine.pytorch.ops.GEGLU
+
+.. autoapiclass:: transformer_engine.pytorch.ops.GELU
+
+.. autoapiclass:: transformer_engine.pytorch.ops.GLU
+
+.. autoapiclass:: transformer_engine.pytorch.ops.GroupedLinear
+
+.. autoapiclass:: transformer_engine.pytorch.ops.Identity
+
+.. autoapiclass:: transformer_engine.pytorch.ops.L2Normalization
+
+.. autoapiclass:: transformer_engine.pytorch.ops.LayerNorm
+
+.. autoapiclass:: transformer_engine.pytorch.ops.MakeExtraOutput
+
+.. autoapiclass:: transformer_engine.pytorch.ops.QGELU
+
+.. autoapiclass:: transformer_engine.pytorch.ops.QGEGLU
+
+.. autoapiclass:: transformer_engine.pytorch.ops.Quantize
+
+.. autoapiclass:: transformer_engine.pytorch.ops.ReGLU
+
+.. autoapiclass:: transformer_engine.pytorch.ops.ReLU
+
+.. autoapiclass:: transformer_engine.pytorch.ops.ReduceScatter
+
+.. autoapiclass:: transformer_engine.pytorch.ops.Reshape
+
+.. autoapiclass:: transformer_engine.pytorch.ops.RMSNorm
+
+.. autoapiclass:: transformer_engine.pytorch.ops.SReGLU
+
+.. autoapiclass:: transformer_engine.pytorch.ops.SReLU
+
+.. autoapiclass:: transformer_engine.pytorch.ops.ScaledClampedQGeGLU
+
+.. autoapiclass:: transformer_engine.pytorch.ops.ScaledSwiGLU
+
+.. autoapiclass:: transformer_engine.pytorch.ops.SiLU
+
+.. autoapiclass:: transformer_engine.pytorch.ops.SwiGLU
 
 Deprecated functions
 --------------------

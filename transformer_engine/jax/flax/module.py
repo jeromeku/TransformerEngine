@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # See LICENSE for license information.
 """
@@ -16,8 +16,11 @@ from jax import lax
 from jax import random as jax_random
 from jax.ad_checkpoint import checkpoint_name
 
+from transformer_engine.common.recipe import (
+    MXFP8BlockScaling,
+)
 
-from ..dense import dense
+from ..dense import dense, grouped_dense
 
 from ..layernorm import canonicalize_norm_type
 from ..layernorm import layernorm
@@ -377,6 +380,7 @@ class TransformerEngineBase(nn.Module):  # pylint: disable=too-few-public-method
         variable_collection: str = None,
         quantization_checkpoint_name: Optional[str] = None,
         fp8_recipe=None,
+        n_groups: int = None,
     ):
         """
         Generate a set of FP8 meta for a GEMM.
@@ -409,6 +413,7 @@ class TransformerEngineBase(nn.Module):  # pylint: disable=too-few-public-method
             fp8_recipe=fp8_recipe,
             quantize_meta_set=quantize_meta_set,
             checkpoint_name=quantization_checkpoint_name,
+            n_groups=n_groups,
         )
         return quantizer_set
 
@@ -1354,3 +1359,126 @@ class LayerNormMLP(TransformerEngineBase):
 
         assert out.dtype == input_dtype
         return out, ln_output  # Output, layer_norm_output
+
+
+def wrap_function_in_te_state_module(
+    f,
+    quantization_recipe,
+    name: Optional[str] = None,
+    quantization_checkpoint_name: Optional[str] = None,
+):
+    """Wraps the given function `f` to support TransformerEngine quantization.
+
+    This method does a couple things:
+
+    1. Wraps the given function in a Flax linen module. This module does not store any Flax parameters
+    but can store Flax variables for quantizers if required by the recipe.
+
+    2. When the wrapper is called, it provides an additional argument to the given function `f`, 'generate_quantizer_set' as the first argument. 'generate_quantizer_set' is a function that can be called to generate a TransformerEngine/JAX quantizer set object used in TransformerEngine/JAX APIs. 'generate_quantizer_set' will generate quantizers based on the recipe of this TransformerEngineQuantizer object.
+
+    Args:
+      f: The function to wrap. The first argument must be 'generate_quantizer_set'.
+      name: The name of this wrapped operation. If unspecified, will use `f.__name__`.
+
+    Returns:
+      A Flax linen module that wraps the given function.
+    """
+
+    import transformer_engine.jax as te
+
+    class TEWrapper(te.flax.module.TransformerEngineBase):
+        """Wrapper Flax module for TransformerEngine quantization support."""
+
+        def generate_quantizer_set(self, postfix: str = "", n_groups: int = None):
+            OVERWRITE_WITH_GRADIENT = "_overwrite_with_gradient"
+            return super().generate_quantizer_set(
+                postfix=postfix,
+                variable_collection=OVERWRITE_WITH_GRADIENT,
+                quantization_checkpoint_name=quantization_checkpoint_name,
+                fp8_recipe=quantization_recipe,
+                n_groups=n_groups,
+            )
+
+        @nn.compact
+        def __call__(self, *args, **kwargs):
+            return f(self.generate_quantizer_set, *args, **kwargs)
+
+    TEWrapper.__name__ = f"TEWrapper_{name if name else f.__name__}"
+
+    return TEWrapper
+
+
+def make_dot_general_cls(quantization_recipe):
+    """Creates a Flax module class that performs a dot_general operation with the arguments x and kernel using the given quantization recipe.
+
+    This is intended for usage when you already have model parameters initialized and sharded for the kernel weights and you want to replace the GEMM implementation with TE's quantized GEMM using a given recipe.
+
+    For example,
+    ```
+        te_dot_general_cls = make_dot_general_cls(DelayedScaling())
+        dense = nn.Dense(..., dot_general=te_dot_general_cls())
+    ```
+
+    If you would like a drop-in replacement for nn.Dense that manages the model weights itself, please use TE's DenseGeneral module.
+
+    Args:
+        quantization_recipe: The quantization recipe to use for the dot_general operation.
+    Returns:
+        A Flax module class that performs a dot_general operation with the given quantization recipe.
+    """
+    import transformer_engine.jax as te
+    from transformer_engine.common.recipe import NVFP4BlockScaling
+
+    def te_dot_general(generate_quantizer_set, x, kernel, dims, **kwargs):
+        """Performs a dot_general operation using TransformerEngine with quantization."""
+        del kwargs  # Unused
+        contracting_dims, batch_dims = dims
+        assert batch_dims == ((), ()), "Batch dimensions must be empty for TransformerEngine dot."
+
+        quantizer_set = generate_quantizer_set()
+
+        if isinstance(quantization_recipe, NVFP4BlockScaling):
+            # NVFP4 RHT requires inputs to be in bfloat16
+            x = x.astype(jnp.bfloat16)
+            kernel = kernel.astype(jnp.bfloat16)
+
+        return te.dense.dense(
+            x,
+            kernel,
+            contracting_dims=contracting_dims,
+            quantizer_set=quantizer_set,
+        )
+
+    return wrap_function_in_te_state_module(te_dot_general, quantization_recipe, "dot_general")
+
+
+def make_grouped_dense_cls(quantization_recipe, quantization_checkpoint_name: Optional[str] = None):
+    """Creates a grouped dense (grouped GEMM) instance for use with TE state module."""
+    if quantization_recipe is not None:
+        allowed_grouped_gemm_recipes = [MXFP8BlockScaling]
+        assert any(isinstance(quantization_recipe, r) for r in allowed_grouped_gemm_recipes), (
+            "Only the following quantization recipes are supported for grouped GEMM or `None` for"
+            f" BF16 without quantization: {allowed_grouped_gemm_recipes}. Got"
+            f" {type(quantization_recipe)}."
+        )
+
+    def te_grouped_dot_general(generate_quantizer_set, x, kernel, group_sizes, **kwargs):
+        del kwargs  # Unused
+        num_groups = group_sizes.shape[0]
+        quantizer_set = generate_quantizer_set(n_groups=num_groups)
+
+        out = grouped_dense(
+            x,
+            kernel,
+            group_sizes=group_sizes,
+            contracting_dims=((1,), (1,)),
+            quantizer_set=quantizer_set,
+        )
+        return out
+
+    return wrap_function_in_te_state_module(
+        te_grouped_dot_general,
+        quantization_recipe,
+        "ragged_dot",
+        quantization_checkpoint_name=quantization_checkpoint_name,
+    )()

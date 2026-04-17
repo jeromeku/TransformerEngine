@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See LICENSE for license information.
  ************************************************************************/
@@ -121,6 +121,11 @@ void hash_combine(int64_t &seed, const T &v, Rest... rest) {
   seed ^= std::hash<T>{}(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   (hash_combine(seed, rest), ...);
 }
+
+enum class JAXX_Score_Function : int64_t {
+  SIGMOID = 0,
+  SOFTMAX = 1,
+};
 
 enum class JAXX_Collective_Op : int64_t {
   NONE = 0,

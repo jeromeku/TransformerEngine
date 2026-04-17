@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See LICENSE for license information.
  ************************************************************************/
@@ -61,12 +61,6 @@ int main(int argc, char* argv[]) {
   auto ret = RUN_ALL_TESTS();
   CHECK_MPI(MPI_Finalize());
   return ret;
-}
-
-bool IsMulticastSupported(int device_id) {
-  int supported = 0;
-  CHECK_CU(cuDeviceGetAttribute(&supported, CU_DEVICE_ATTRIBUTE_MULTICAST_SUPPORTED, device_id));
-  return supported;
 }
 
 int GetDeviceComputeCapability(int device_id) {
@@ -210,7 +204,7 @@ class CommGemmFixure : public ::testing::TestWithParam<Params> {
     std::vector<BType> bdata(k * n);
     std::generate(bdata.begin(), bdata.end(),
                   [&rng, &dist, b_scale] { return static_cast<BType>(dist(rng) * b_scale); });
-    std::vector<BiasType> biasdata(m * n);
+    std::vector<BiasType> biasdata(m);
     std::generate(biasdata.begin(), biasdata.end(), [&rng, &dist, bias_scale] {
       return static_cast<BiasType>(dist(rng) * bias_scale);
     });
@@ -219,7 +213,7 @@ class CommGemmFixure : public ::testing::TestWithParam<Params> {
                      : MakeFromData<AType>(adata, 0, 0, m, k, m, a_scale);
     auto gb = transb ? MakeFromData<BType>(bdata, 0, 0, n, k, n, b_scale)
                      : MakeFromData<BType>(bdata, 0, 0, k, n, k, b_scale);
-    auto gbias = MakeFromData<BiasType>(biasdata, 0, 0, m, n, m, bias_scale);
+    auto gbias = MakeFromData<BiasType>(biasdata, 0, 0, m, 1, m, bias_scale);
     auto gd = Make<DType>(m, n, d_scale);
     auto gaux = Make<DType>(m, n, d_scale);
 
@@ -232,8 +226,8 @@ class CommGemmFixure : public ::testing::TestWithParam<Params> {
                                           dims.b_cols_num, dims.b_rows_num, n, b_scale)
                     : MakeFromData<BType>(bdata, dims.b_rows_start, dims.b_cols_start,
                                           dims.b_rows_num, dims.b_cols_num, k, b_scale);
-    auto bias = MakeFromData<BiasType>(biasdata, dims.d_rows_start, dims.d_cols_start,
-                                       dims.d_rows_num, dims.d_cols_num, m, bias_scale);
+    auto bias = MakeFromData<BiasType>(biasdata, dims.d_rows_start, 0, dims.d_rows_num, 1, m,
+                                       bias_scale);
     auto d = Make<DType>(dims.d_rows_num, dims.d_cols_num, d_scale);
     auto aux = Make<DType>(dims.d_rows_num, dims.d_cols_num, d_scale);
 
@@ -243,7 +237,7 @@ class CommGemmFixure : public ::testing::TestWithParam<Params> {
              accumulate, 0 /*comm_sm_count*/, stream);
     auto workspace = Make<uint8_t>(1, 32 << 20, 1.0);
     nvte_cublas_gemm(ga.data(), gb.data(), gd.data(), gbias.data(), gaux.data(), transa, transb,
-                     grad, workspace.data(), accumulate, false /* use_split_accumulator */,
+                     grad, workspace.data(), accumulate, true /* use_split_accumulator */,
                      0 /* math_sm_count */, stream);
     NVTE_CHECK_CUDA(cudaStreamSynchronize(stream));
     NVTE_CHECK_CUDA(cudaStreamDestroy(stream));
@@ -259,7 +253,7 @@ class CommGemmFixure : public ::testing::TestWithParam<Params> {
                                  dims.d_rows_num, dims.d_cols_num, m);
     NVTE_CHECK(out.size() == out_golden.size());
     for (size_t i = 0; i < out.size(); ++i) {
-      EXPECT_NEAR(static_cast<float>(out[i]), static_cast<float>(out_golden[i]), tol * k);
+      EXPECT_NEAR(static_cast<float>(out[i]), static_cast<float>(out_golden[i]), tol);
     }
   }
 
@@ -369,11 +363,6 @@ struct GemmAr : public CommGemmFixure {
     nvte_gemm_all_reduce(ctx_, m, n, k, a, b, d, bias, pre_act_out, transa, transb, grad,
                          accumulate, comm_sm_count, stream, kNVTECommGemmAlgoDefault);
   }
-
-  void SetUp() override {
-    if (!IsMulticastSupported(rank_))
-      GTEST_SKIP() << "Multicast is not supported on device " << rank_;
-  }
 };
 
 TEST_P(AgGemm, Gemm) {
@@ -438,35 +427,35 @@ INSTANTIATE_TEST_SUITE_P(AgGemm, AgGemm,
 
 INSTANTIATE_TEST_SUITE_P(GemmRs, GemmRs,
                          testing::Values(Params{DType::kFloat16, DType::kFloat16, DType::kFloat16,
-                                                false, false, 64, 128, 256, 5e-2},
+                                                false, false, 64, 128, 256, 7e-2},
                                          Params{DType::kFloat16, DType::kFloat16, DType::kFloat16,
-                                                false, true, 64, 128, 256, 5e-2},
+                                                false, true, 64, 128, 256, 7e-2},
                                          Params{DType::kFloat16, DType::kFloat16, DType::kFloat16,
-                                                true, false, 64, 128, 256, 5e-2},
+                                                true, false, 64, 128, 256, 7e-2},
                                          Params{DType::kBFloat16, DType::kBFloat16,
-                                                DType::kBFloat16, false, false, 64, 128, 256, 5e-2},
+                                                DType::kBFloat16, false, false, 64, 128, 256, 6e-1},
                                          Params{DType::kBFloat16, DType::kBFloat16,
-                                                DType::kBFloat16, false, true, 64, 128, 256, 5e-2},
+                                                DType::kBFloat16, false, true, 64, 128, 256, 6e-1},
                                          Params{DType::kBFloat16, DType::kBFloat16,
-                                                DType::kBFloat16, true, false, 64, 128, 256, 5e-2},
+                                                DType::kBFloat16, true, false, 64, 128, 256, 6e-1},
                                          Params{DType::kFloat8E4M3, DType::kFloat8E4M3,
-                                                DType::kFloat16, true, false, 64, 128, 256, 5e-2},
+                                                DType::kFloat16, true, false, 64, 128, 256, 1e-1},
                                          Params{DType::kFloat8E4M3, DType::kFloat8E5M2,
-                                                DType::kFloat16, true, false, 64, 128, 256, 5e-2},
+                                                DType::kFloat16, true, false, 64, 128, 256, 7e-2},
                                          Params{DType::kFloat8E5M2, DType::kFloat8E4M3,
-                                                DType::kFloat16, true, false, 64, 128, 256, 5e-2}),
+                                                DType::kFloat16, true, false, 64, 128, 256, 7e-2}),
                          &ParamSuffix);
 
 INSTANTIATE_TEST_SUITE_P(
     GemmAr, GemmAr,
     testing::Values(Params{DType::kFloat16, DType::kFloat16, DType::kFloat16, true, false, 64,
-                           64 * 4, 64 * 4, 5e-2},
+                           64 * 4, 64 * 4, 7e-2},
                     Params{DType::kBFloat16, DType::kBFloat16, DType::kBFloat16, true, false, 64,
-                           64 * 4, 64 * 4, 5e-2},
+                           64 * 4, 64 * 4, 1e-3},
                     Params{DType::kFloat8E5M2, DType::kFloat8E4M3, DType::kFloat16, true, false,
-                           128, 128 * 4, 128 * 4, 5e-2},
+                           128, 128 * 4, 128 * 4, 1.5e-1},
                     Params{DType::kFloat8E4M3, DType::kFloat8E5M2, DType::kFloat16, true, false,
-                           128, 128 * 4, 128 * 4, 5e-2},
+                           128, 128 * 4, 128 * 4, 1.5e-1},
                     Params{DType::kFloat8E4M3, DType::kFloat8E4M3, DType::kFloat16, true, false,
-                           128, 128 * 4, 128 * 4, 5e-2}),
+                           128, 128 * 4, 128 * 4, 1.5e-1}),
     &ParamSuffix);

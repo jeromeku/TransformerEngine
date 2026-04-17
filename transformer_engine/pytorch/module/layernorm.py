@@ -1,10 +1,10 @@
-# Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # See LICENSE for license information.
 
 """LayerNorm API"""
 import warnings
-from typing import Iterable, Optional, Union
+from typing import Any, Iterable, Optional, Union
 
 import torch
 
@@ -101,6 +101,10 @@ class LayerNorm(_LayerNormOp):
             zero_centered_gamma=zero_centered_gamma,
             **kwargs,
         )
+
+    def fast_setattr(self, name: str, value: Any) -> None:
+        """Fast attribute set for non-parameter fields."""
+        self.__dict__[name] = value
 
     def reset_layer_norm_parameters(self) -> None:
         """Init LN params"""

@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # See LICENSE for license information.
 """JAX multi-head attention modules"""
@@ -569,6 +569,8 @@ def _segment_ids_pos_to_seqlens_offsets(
     # using the segment ids and pos along with mask type (causal or brcm) is sufficient.
     # It does not need to involve SW for this mask's creation
 
+    # Currently, this function is only exercised for THD qkv_layout.
+
     # TODO(KshitijLakhani): Try exercising the fast path for BRCM as well
     if (attn_mask_type.is_causal() and window_size is None) or (
         window_size == (-1, -1) and not attn_mask_type.is_bottom_right()
@@ -658,7 +660,7 @@ class SequenceDescriptor:
     - SequenceDescriptor.from_seqlens_and_offsets
       For THD (packed) cases, where each batch may have not only 1 sequence.
     - SequenceDescriptor.from_segment_ids_and_pos
-      Experimental feature for THD (packed) cases with context parallelism.
+      Experimental feature for BSHD (with and without reordering) and THD (packed) cases without reordering
     """
 
     seqlens: Optional[Tuple[jnp.ndarray, jnp.ndarray]]
@@ -693,26 +695,83 @@ class SequenceDescriptor:
         self, attn_mask_type, qkv_layout, window_size, max_segments_per_seq
     ):
         """
-        Acquire the seqlens/offsets for cuDNN backend
+        Acquire the seqlens/offsets for cuDNN backend.
         """
         q_segment_ids, kv_segment_ids = self.segment_ids
         q_segment_pos, kv_segment_pos = self.segment_pos
-        assert q_segment_ids.shape == q_segment_pos.shape
-        assert kv_segment_ids.shape == kv_segment_pos.shape
         # No segment_ids/segment_pos
         if q_segment_ids.size + kv_segment_ids.size == 0:
             return self.seqlens, self.seq_offsets
 
-        if qkv_layout.is_thd():
-            q_seqlens, kv_seqlens, q_offsets, kv_offsets = _segment_ids_pos_to_seqlens_offsets(
-                q_segment_ids,
-                kv_segment_ids,
-                q_segment_pos,
-                kv_segment_pos,
-                attn_mask_type,
-                window_size,
-                max_segments_per_seq,
+        # Allow segment_pos to have fewer leading dims than segment_ids if vmapped segment_ids and non-vmapped segment_pos
+        # e.g. when using from_segment_ids_and_pos() for segment_pos generation from segment_ids it is acceptable to have
+        # something like : segment_ids (B, batch, seq), segment_pos (batch, seq)).
+        if q_segment_ids.ndim < q_segment_pos.ndim or kv_segment_ids.ndim < kv_segment_pos.ndim:
+            raise AssertionError(
+                "segment_ids must not have fewer dims than segment_pos; got"
+                f" q_segment_ids.ndim={q_segment_ids.ndim},"
+                f" q_segment_pos.ndim={q_segment_pos.ndim},"
+                f" kv_segment_ids.ndim={kv_segment_ids.ndim},"
+                f" kv_segment_pos.ndim={kv_segment_pos.ndim}"
             )
+        if not (
+            q_segment_ids.shape[-q_segment_pos.ndim :] == q_segment_pos.shape
+            and kv_segment_ids.shape[-kv_segment_pos.ndim :] == kv_segment_pos.shape
+        ):
+            raise AssertionError(
+                "segment_pos trailing shape must match segment_ids; got"
+                f" q_segment_ids.shape={q_segment_ids.shape},"
+                f" q_segment_pos.shape={q_segment_pos.shape},"
+                f" kv_segment_ids.shape={kv_segment_ids.shape},"
+                f" kv_segment_pos.shape={kv_segment_pos.shape}"
+            )
+        # THD: compute seqlens/offsets.
+        if qkv_layout.is_thd():
+            # If there are more leading dims on segment_ids, e.g. vmap
+            if q_segment_ids.ndim > q_segment_pos.ndim or kv_segment_ids.ndim > kv_segment_pos.ndim:
+                # Flatten leading batch dims so that segment_ids and segment_pos have the same number of leading dims,
+                # vmap seqlens/offsets computation with segment_pos broadcast,
+                # reshape back to the original leading batch dims.
+                n_extra_batch_dims_q = q_segment_ids.ndim - q_segment_pos.ndim
+                n_extra_batch_dims_kv = kv_segment_ids.ndim - kv_segment_pos.ndim
+                extra_batch_shape_q = q_segment_ids.shape[:n_extra_batch_dims_q]
+                extra_batch_shape_kv = kv_segment_ids.shape[:n_extra_batch_dims_kv]
+                extra_flat_batch_size_q = jnp.prod(extra_batch_shape_q)
+                extra_flat_batch_size_kv = jnp.prod(extra_batch_shape_kv)
+                # vmap below requires same batch size on axis 0 for q_flat and kv_flat; JAX will raise if they differ.
+                q_flat = q_segment_ids.reshape(
+                    extra_flat_batch_size_q, *q_segment_ids.shape[n_extra_batch_dims_q:]
+                )
+                kv_flat = kv_segment_ids.reshape(
+                    extra_flat_batch_size_kv, *kv_segment_ids.shape[n_extra_batch_dims_kv:]
+                )
+
+                single_extra_batch = partial(
+                    _segment_ids_pos_to_seqlens_offsets,
+                    attn_mask_type=attn_mask_type,
+                    window_size=window_size,
+                    max_segments_per_seq=max_segments_per_seq,
+                )
+
+                q_sl, kv_sl, q_off, kv_off = jax.vmap(
+                    single_extra_batch, in_axes=(0, 0, None, None)
+                )(q_flat, kv_flat, q_segment_pos, kv_segment_pos)
+
+                q_seqlens = q_sl.reshape(*extra_batch_shape_q, *q_sl.shape[1:])
+                kv_seqlens = kv_sl.reshape(*extra_batch_shape_kv, *kv_sl.shape[1:])
+                q_offsets = q_off.reshape(*extra_batch_shape_q, *q_off.shape[1:])
+                kv_offsets = kv_off.reshape(*extra_batch_shape_kv, *kv_off.shape[1:])
+            else:
+                q_seqlens, kv_seqlens, q_offsets, kv_offsets = _segment_ids_pos_to_seqlens_offsets(
+                    q_segment_ids,
+                    kv_segment_ids,
+                    q_segment_pos,
+                    kv_segment_pos,
+                    attn_mask_type,
+                    window_size,
+                    max_segments_per_seq,
+                )
+        # BSHD: compute seqlens/offsets.
         else:
             q_seqlens, kv_seqlens = _segment_ids_to_seqlens(
                 q_segment_ids,
@@ -798,7 +857,7 @@ class SequenceDescriptor:
         segment_pos: Optional[Union[jnp.ndarray, Tuple[jnp.ndarray, jnp.ndarray]]] = None,
     ) -> SequenceDescriptor:
         """
-        Experimental factory method for inputs with segment IDs and optional positions. (THD)
+        Experimental factory method for inputs with segment IDs and positions.
         Args:
             segment_ids(Tuple(jnp.ndarray, jnp.ndarray)) = (q_segment_ids, kv_segment_ids):
                 - q_segment_ids (jnp.ndarray):
@@ -815,23 +874,32 @@ class SequenceDescriptor:
         Return:
             A SequenceDescriptor with segment_ids/segment_pos initialized.
         """
+        # Examples (0 in segment_ids means padding):
+        # THD (three segments packed together in a sequence of length 16 with no intra-segment padding):
+        # segment_ids = [1, 1, 1, 2, 2, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0]
+        # segment_pos = [0, 1, 2, 0, 1, 0, 1, 2, 3, 4, 0, 0, 0, 0, 0, 0]
+        # THD (three segments packed together in a sequence of length 16 with intra-segment padding):
+        # segment_ids = [1, 1, 1, 2, 2, 3, 3, 3, 0, 0, 4, 4, 0, 0, 0, 0]
+        # segment_pos = [0, 1, 2, 0, 1, 0, 1, 2, 3, 4, 0, 1, 0, 0, 0, 0]
+        # BSHD (only one segment per sequence):
+        # segment_ids = [1, 1, 1, 1, 1, 1, 1, 0, 0]
+        # segment_pos = [0, 1, 2, 3, 4, 5, 6, 7, 8]
+        # TODO(@KshitijLakhani): Make segment_pos Union[jnp.ndarray, Tuple[jnp.ndarray, jnp.ndarray]] and remove below check (starting June 2026)
+        if segment_pos is None:
+            raise ValueError(
+                "segment_pos is now required. Automatic segment_pos generation was removed because"
+                " it did not have sufficient context to generate a correct segment_pos across all"
+                " load-balancing and context-parallel strategies. Please generate the segment_pos"
+                " explicitly.See tests/jax/test_fused_attn.py generate_random_segment_ids_and_pos()"
+                " and generate_valid_segment_ids_and_pos()"
+            )
+
         q_seg_ids, kv_seg_ids = cls._expand_to_pair(segment_ids)
-
-        if segment_pos is not None:
-            segment_pos = cls._expand_to_pair(segment_pos)
-        else:
-
-            def generate_default_pos(segment_ids):
-                seqlen = segment_ids.shape[-1]
-                return jnp.broadcast_to(jnp.arange(seqlen), segment_ids.shape)
-
-            q_seg_pos = generate_default_pos(q_seg_ids)
-            kv_seg_pos = generate_default_pos(kv_seg_ids)
-            segment_pos = (q_seg_pos, kv_seg_pos)
+        q_seg_pos, kv_seg_pos = cls._expand_to_pair(segment_pos)
 
         return cls(
             segment_ids=(q_seg_ids, kv_seg_ids),
-            segment_pos=segment_pos,
+            segment_pos=(q_seg_pos, kv_seg_pos),
         )
 
 
@@ -1309,6 +1377,15 @@ def fused_attn(
             context_parallel_causal_load_balanced=context_parallel_causal_load_balanced,
             context_parallel_axis=context_parallel_axis,
             softmax_offset=softmax_offset,
+        )
+    if max_segments_per_seq > 1 and not qkv_layout.is_thd():
+        warnings.warn(
+            f"max_segments_per_seq={max_segments_per_seq} is set but qkv_layout={qkv_layout} is "
+            "not a THD layout. max_segments_per_seq > 1 only applies when using THD layouts "
+            "(e.g. QKVLayout.T3HD, QKVLayout.THD_T2HD, QKVLayout.THD_THD_THD) for sequence "
+            "packing.",
+            UserWarning,
+            stacklevel=2,
         )
     output = _fused_attn(
         qkv,

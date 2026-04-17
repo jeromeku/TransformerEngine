@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # See LICENSE for license information.
 
@@ -94,7 +94,7 @@ class FusibleOperation(torch.nn.Module, metaclass=abc.ABCMeta):
         several of this function's arguments are lists of arguments to
         forward functions of corresponding basic ops.
 
-        Called by `OperationFuser`.
+        Called by ``OperationFuser``.
 
         Parameters
         ----------
@@ -141,7 +141,7 @@ class FusibleOperation(torch.nn.Module, metaclass=abc.ABCMeta):
         several of this function's arguments are lists of arguments to
         backward functions of corresponding basic ops.
 
-        Called by `OperationFuser`.
+        Called by ``OperationFuser``.
 
         Parameters
         ----------
@@ -322,14 +322,15 @@ class BasicOperation(FusibleOperation, metaclass=abc.ABCMeta):
                         pos, buffer_key = self._fp8_metas[mode][
                             FP8GlobalStateManager.get_buffer_info()
                         ]
-                        if buffer_key in FP8GlobalStateManager.global_amax_buffer:
+                        qstate = FP8GlobalStateManager.quantization_state
+                        if buffer_key in qstate.global_amax_buffer:
                             assert (
-                                buffer_key in FP8GlobalStateManager.global_amax_history_buffer
+                                buffer_key in qstate.global_amax_history_buffer
                             ), "TE internal error during amax history change."
-                            FP8GlobalStateManager.global_amax_buffer[buffer_key][pos] = (
-                                recipe_state.amax_history[0]
-                            )
-                            FP8GlobalStateManager.global_amax_history_buffer[buffer_key][
+                            qstate.global_amax_buffer[buffer_key][pos] = recipe_state.amax_history[
+                                0
+                            ]
+                            qstate.global_amax_history_buffer[buffer_key][
                                 pos
                             ] = recipe_state.amax_history
 

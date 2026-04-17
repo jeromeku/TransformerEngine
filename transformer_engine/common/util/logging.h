@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See LICENSE for license information.
  ************************************************************************/
@@ -17,6 +17,10 @@
 #ifdef NVTE_WITH_CUBLASMP
 #include <cublasmp.h>
 #endif  // NVTE_WITH_CUBLASMP
+
+#ifdef NVTE_WITH_CUSOLVERMP
+#include <cusolverMp.h>
+#endif  // NVTE_WITH_CUSOLVERMP
 
 #include <iostream>
 #include <stdexcept>
@@ -96,15 +100,27 @@
 
 #ifdef NVTE_WITH_CUBLASMP
 
-#define NVTE_CHECK_CUBLASMP(expr)                             \
-  do {                                                        \
-    const cublasMpStatus_t status = (expr);                   \
-    if (status != CUBLASMP_STATUS_SUCCESS) {                  \
-      NVTE_ERROR("cuBLASMp Error: ", std::to_string(status)); \
-    }                                                         \
+#define NVTE_CHECK_CUBLASMP(expr)                                      \
+  do {                                                                 \
+    const cublasMpStatus_t status = (expr);                            \
+    if (status != CUBLASMP_STATUS_SUCCESS) {                           \
+      NVTE_ERROR("cuBLASMp Error: ", cublasMpGetStatusString(status)); \
+    }                                                                  \
   } while (false)
 
 #endif  // NVTE_WITH_CUBLASMP
+
+#ifdef NVTE_WITH_CUSOLVERMP
+
+#define NVTE_CHECK_CUSOLVERMP(expr)                                                   \
+  do {                                                                                \
+    const cusolverStatus_t status_NVTE_CHECK_CUSOLVERMP = (expr);                     \
+    if (status_NVTE_CHECK_CUSOLVERMP != CUSOLVER_STATUS_SUCCESS) {                    \
+      NVTE_ERROR("cuSolverMp Error: ", std::to_string(status_NVTE_CHECK_CUSOLVERMP)); \
+    }                                                                                 \
+  } while (false)
+
+#endif  // NVTE_WITH_CUSOLVERMP
 
 #define NVTE_CHECK_NCCL(expr)                                                 \
   do {                                                                        \

@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # See LICENSE for license information.
 
@@ -217,6 +217,12 @@ class CurrentScalingQuantizerRef(Quantizer):
 
         self.with_amax_reduction = False
         self.amax_reduction_group = None
+
+    def __getstate__(self):
+        """Exclude unpicklable process group from serialized state."""
+        state = self.__dict__.copy()
+        state["amax_reduction_group"] = None
+        return state
 
     @property
     def custom(self) -> bool:

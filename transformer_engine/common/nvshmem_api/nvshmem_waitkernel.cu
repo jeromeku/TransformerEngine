@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * See LICENSE for license information.
  ************************************************************************/
@@ -15,6 +15,7 @@
 #include <sstream>
 #include <string>
 
+#include "../util/cuda_driver.h"
 #include "../util/logging.h"
 #include "nvshmem_waitkernel.h"
 

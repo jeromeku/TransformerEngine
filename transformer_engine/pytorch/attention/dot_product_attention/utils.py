@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # See LICENSE for license information.
 
@@ -135,10 +135,7 @@ class FlashAttentionUtils:
     # Please follow these instructions to install FA3
     v3_installation_steps = """\
 (1) git clone https://github.com/Dao-AILab/flash-attention.git
-(2) cd flash-attention/hopper && python setup.py install
-(3) python_path=`python -c "import site; print(site.getsitepackages()[0])"`
-(4) mkdir -p $python_path/flash_attn_3
-(5) cp flash_attn_interface.py $python_path/flash_attn_3/flash_attn_interface.py"""
+(2) cd flash-attention/hopper && python setup.py install"""
     v3_warning_printed = False
 
     @staticmethod
@@ -200,6 +197,9 @@ class AttentionParams:
         `causal_bottom_right`, `padding_causal_bottom_right`, `arbitrary`}
     window_size : Tuple[int, int], default = None
         Sliding window attention size.
+    bottom_right_diagonal: bool, default = `None`
+        Whether to align sliding window and ALiBi diagonal to the bottom right corner
+        of the softmax matrix.
     alibi_slopes_shape : Optional[Union[torch.Size, List]], default = None
         Tensor shape of :attr:`alibi_slopes` in `DotProductAttention`.
     core_attention_bias_type : str, default = no_bias
@@ -249,6 +249,7 @@ class AttentionParams:
     head_dim_v: int = 64
     attn_mask_type: str = "no_mask"
     window_size: Union[Tuple[int, int], None] = None
+    bottom_right_diagonal: bool = True
     alibi_slopes_shape: Union[torch.Size, List, None] = None
     core_attention_bias_type: str = "no_bias"
     core_attention_bias_shape: str = "1hss"
@@ -325,6 +326,7 @@ def get_attention_backend(
     head_dim_v = attention_params.head_dim_v
     attn_mask_type = attention_params.attn_mask_type
     window_size = attention_params.window_size
+    bottom_right_diagonal = attention_params.bottom_right_diagonal
     alibi_slopes_shape = attention_params.alibi_slopes_shape
     core_attention_bias_type = attention_params.core_attention_bias_type
     core_attention_bias_shape = attention_params.core_attention_bias_shape
@@ -474,7 +476,9 @@ def get_attention_backend(
                 logger.debug("Disabling FlashAttention 3 for FP8 training")
             use_flash_attention_3 = False
         if use_unfused_attention:
-            allow_emulation = os.getenv("NVTE_UnfusedDPA_Emulate_FP8", "0") == "1"
+            allow_emulation = (
+                os.getenv("NVTE_UnfusedDPA_Emulate_FP8", "0") == "1" or is_in_onnx_export_mode()
+            )
             if not allow_emulation:
                 logger.debug("Disabling UnfusedDotProductAttention for FP8 attention")
                 use_unfused_attention = False
@@ -547,11 +551,15 @@ def get_attention_backend(
     #          | FP8            | non-paged/paged | sm90         | thd           | >= 1
     # Unfused  | FP32/FP16/BF16 | non-paged/paged | all          | bshd,sbhd,thd | >= 1
     if inference_params is not None:
-        # Temporarily disabling fused attention for kv caching for sm89 irrespective of cuDNN version
-        # until the cuDNN bug is resolved
-        if device_compute_capability == (8, 9):
-            logger.debug("Disabling FusedAttention for KV caching for sm89")
+        # Temporarily disabling fused attention for kv caching for sm89/sm120 irrespective of
+        # cuDNN version until the cuDNN bug is resolved.
+        if device_compute_capability in ((8, 9), (12, 0)):
+            logger.debug("Disabling FusedAttention for KV caching for sm89/sm120")
             use_fused_attention = False
+        # Temporarily disable FlashAttention for KV caching on sm120
+        if device_compute_capability == (12, 0):
+            logger.debug("Disabling FlashAttention for KV caching for sm120")
+            use_flash_attention = False
         if context_parallel:
             logger.debug("Disabling all backends for KV caching with context parallelism")
             use_flash_attention = False
@@ -684,12 +692,21 @@ def get_attention_backend(
                 )
             use_flash_attention = False
         if device_compute_capability == (12, 0):
-            if use_fused_attention:
-                logger.debug(
-                    "Disabling FusedAttention as qkv_format = thd is"
-                    " not supported for compute capability = sm120"
-                )
-            use_fused_attention = False
+            if cudnn_version < (9, 18, 1):
+                if use_fused_attention:
+                    logger.debug(
+                        "Disabling FusedAttention as qkv_format = thd is"
+                        " not supported for compute capability = sm120 and cuDNN version < 9.18.1"
+                    )
+                use_fused_attention = False
+            elif qkv_layout in {"t3hd", "th3d"}:
+                if use_fused_attention:
+                    logger.debug(
+                        "Disabling FusedAttention as qkv_layout = %s is not supported for"
+                        " compute capability = sm120",
+                        qkv_layout,
+                    )
+                use_fused_attention = False
 
     # Filter: Dropout
     if attention_dropout != 0.0 and use_flash_attention_3:
@@ -716,22 +733,14 @@ def get_attention_backend(
             )
             use_unfused_attention = False
         if qkv_format == "thd":
-            logger.debug(
-                "Disabling FusedAttention for softmax_type = %s and qkv_format = thd", softmax_type
-            )
-            use_fused_attention = False
-            logger.debug(
-                "Disabling UnfusedDotProductAttention for softmax_type = %s and qkv_format = thd",
-                softmax_type,
-            )
-            use_unfused_attention = False
+            if cudnn_version < (9, 18, 0):
+                logger.debug(
+                    "Disabling FusedAttention for softmax_type = %s, qkv_format = thd and cuDNN"
+                    " version < 9.18",
+                    softmax_type,
+                )
+                use_fused_attention = False
         if context_parallel:
-            logger.debug(
-                "Disabling UnfusedDotProductAttention for context parallelism with softmax_type"
-                " = %s",
-                softmax_type,
-            )
-            use_unfused_attention = False
             if cp_comm_type != "a2a":
                 logger.debug(
                     "Disabling FusedAttention for context parallelism with softmax_type = %s and"
@@ -867,39 +876,43 @@ def get_attention_backend(
     #    backend                 |      window_size       | diagonal alignment
     # ---------------------------------------------------------------------------------
     # FlashAttention             | (-1, -1) or (>=0, >=0) | bottom right
-    # FusedAttention             | (-1,  0) or (>=0, 0)   | top left
-    # UnfusedDotProductAttention | (-1, -1) or (>=0, >=0) | both;
+    # FusedAttention             | (-1,  0) or (>=0, >=0) | top left, bottom right
+    # UnfusedDotProductAttention | (-1, -1) or (>=0, >=0) | top left, bottom right
     #                            |                        | converts window_size to an 'arbitrary' mask
     if window_size is None:
         window_size = check_set_window_size(attn_mask_type, window_size)
-    else:
-        if use_fused_attention and (window_size[0] != -1 or window_size[1] not in [-1, 0]):
-            if fp8 and (fp8_meta["recipe"].fp8_dpa or fp8_meta["recipe"].fp8_mha):
-                logger.debug(
-                    "Disabling FusedAttention as it does not support sliding window attention"
-                    " for FP8"
-                )
-                use_fused_attention = False
-            elif window_size[1] != 0 or attention_dropout != 0.0:
-                logger.debug(
-                    "Disabling FusedAttention as it only supports sliding window attention "
-                    "with (left, 0) and no dropout"
-                )
-                use_fused_attention = False
-            elif max_seqlen_q > max_seqlen_kv:
-                logger.debug(
-                    "Disabling FusedAttention as it does not support sliding window attention "
-                    "with s_q > s_kv for cross-attention"
-                )
-                use_fused_attention = False
-        if use_flash_attention_2 and (window_size[0] != -1 or window_size[1] not in [-1, 0]):
-            if not FlashAttentionUtils.is_installed:
-                FlashAttentionUtils.version_required = PkgVersion("2.3")
-            elif not FlashAttentionUtils.v2_3_plus:
-                logger.debug(
-                    "Disabling FlashAttention as sliding window attention requires flash-attn 2.3+"
-                )
-                use_flash_attention_2 = False
+    if use_fused_attention and (window_size[0] != -1 or window_size[1] not in [-1, 0]):
+        if fp8 and (fp8_meta["recipe"].fp8_dpa or fp8_meta["recipe"].fp8_mha):
+            logger.debug(
+                "Disabling FusedAttention as it does not support sliding window attention for FP8"
+            )
+            use_fused_attention = False
+        elif attention_dropout != 0.0:
+            logger.debug(
+                "Disabling FusedAttention as it only supports sliding window attention "
+                "without dropout"
+            )
+            use_fused_attention = False
+        elif max_seqlen_q > max_seqlen_kv:
+            logger.debug(
+                "Disabling FusedAttention as it does not support sliding window attention "
+                "with s_q > s_kv for cross-attention"
+            )
+            use_fused_attention = False
+    if use_flash_attention_2 and (window_size[0] != -1 or window_size[1] not in [-1, 0]):
+        if not FlashAttentionUtils.is_installed:
+            FlashAttentionUtils.version_required = PkgVersion("2.3")
+        elif not FlashAttentionUtils.v2_3_plus:
+            logger.debug(
+                "Disabling FlashAttention as sliding window attention requires flash-attn 2.3+"
+            )
+            use_flash_attention_2 = False
+        elif not bottom_right_diagonal and max_seqlen_q != max_seqlen_kv:
+            logger.debug(
+                "Disabling FlashAttention as it only supports sliding window with bottom right"
+                " diagonal alignment for cross-attention"
+            )
+            use_flash_attention = False
 
     # Filter: Attention bias
     #    backend                 |      bias types              | ALiBi diagonal alignment
@@ -921,6 +934,12 @@ def get_attention_backend(
             elif not FlashAttentionUtils.v2_4_plus:
                 logger.debug("Disabling FlashAttention as ALiBi requires flash-attn 2.4+")
                 use_flash_attention_2 = False
+            elif not bottom_right_diagonal and max_seqlen_q != max_seqlen_kv:
+                logger.debug(
+                    "Disabling FlashAttention as it only supports ALiBi with bottom right diagonal"
+                    " alignment for cross-attention"
+                )
+                use_flash_attention = False
 
     if (
         core_attention_bias_type not in ["no_bias", "alibi"]
@@ -938,13 +957,12 @@ def get_attention_backend(
     if (
         use_fused_attention
         and core_attention_bias_type == "alibi"
-        and (alibi_slopes_shape is not None or max_seqlen_q != max_seqlen_kv)
+        and (alibi_slopes_shape is not None)
     ):
         fu_core_attention_bias_type = "post_scale_bias"
         fu_core_attention_bias_requires_grad = False
-        if alibi_slopes_shape is None:
-            fu_core_attention_bias_shape = "1hss"
-        elif len(alibi_slopes_shape) == 1 and alibi_slopes_shape[0] == num_heads:
+
+        if len(alibi_slopes_shape) == 1 and alibi_slopes_shape[0] == num_heads:
             fu_core_attention_bias_shape = "1hss"
         elif (
             len(alibi_slopes_shape) == 2
@@ -958,12 +976,13 @@ def get_attention_backend(
         and fu_core_attention_bias_type == "post_scale_bias"
         and fu_core_attention_bias_shape != "1hss"
     ):
-        if fu_core_attention_bias_requires_grad:
-            # remove this line when cuDNN adds bwd support for
-            # [1, 1, s, s], [b, 1, s, s] and [b, h, s, s]
-            logger.debug("Disabling FusedAttention for dBias in [1, H, S, S] shape")
+        # dbias calculation is not supported for 111s as of cuDNN 9.18. So, use fused attention backend only if bias does not require grad.
+        if fu_core_attention_bias_requires_grad and fu_core_attention_bias_shape == "111s":
+            logger.warning(
+                "Disabling FusedAttention as dbias calculation is not supported for 111s"
+            )
             use_fused_attention = False
-        else:
+        elif not fu_core_attention_bias_requires_grad:
             # max512 backend will only support [1, h, s, s]
             os.environ["NVTE_FUSED_ATTN_BACKEND"] = "1"
 
@@ -994,6 +1013,7 @@ def get_attention_backend(
             window_size[1],
             return_max_logit,
             cuda_graph,
+            deterministic,
         )
         if fused_attention_backend == FusedAttnBackend["No_Backend"]:
             logger.debug("Disabling FusedAttention as no backend supports the provided input")
@@ -1048,8 +1068,24 @@ def get_attention_backend(
             )
             use_flash_attention_2 = False
     if use_fused_attention and deterministic:
-        if fused_attention_backend == FusedAttnBackend["FP8"] and is_training:
-            logger.debug("Disabling FusedAttention for determinism reasons with FP8")
+        if softmax_type != "vanilla":
+            logger.debug(
+                "Disabling FusedAttention for determinism reasons with softmax_type = %s. "
+                "Sink attention (off-by-one and learnable softmax) requires "
+                "NVTE_ALLOW_NONDETERMINISTIC_ALGO=1",
+                softmax_type,
+            )
+            use_fused_attention = False
+            fused_attention_backend = None
+        if (
+            fused_attention_backend == FusedAttnBackend["FP8"]
+            and is_training
+            and (device_compute_capability < (9, 0) or cudnn_version < (9, 19, 0))
+        ):
+            logger.debug(
+                "Disabling FusedAttention for determinism reasons with FP8 on arch < sm90 or cuDNN"
+                " < 9.19.0"
+            )
             use_fused_attention = False
             fused_attention_backend = None
         if (
@@ -1062,10 +1098,6 @@ def get_attention_backend(
             )
         ):
             logger.debug("Disabling FusedAttention for determinism reasons with post_scale_bias")
-            use_fused_attention = False
-            fused_attention_backend = None
-        if is_training and device_compute_capability >= (10, 0):
-            logger.debug("Disabling FusedAttention for determinism reasons on Blackwell")
             use_fused_attention = False
             fused_attention_backend = None
 
