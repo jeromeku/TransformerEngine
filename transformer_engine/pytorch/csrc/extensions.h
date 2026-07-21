@@ -31,6 +31,11 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> fused_topk_with_score_function_fw
     std::optional<int> group_topk, std::optional<float> scaling_factor, std::string score_function,
     std::optional<at::Tensor> expert_bias);
 
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
+fused_qb_topk_with_score_function_fwd(at::Tensor logits, at::Tensor beta, int topk,
+                                      std::optional<float> scaling_factor,
+                                      std::string score_function);
+
 void fused_topk_with_score_function_bwd(int num_tokens, int num_experts, at::Tensor routing_map,
                                         at::Tensor intermediate_output, at::Tensor grad_probs,
                                         at::Tensor grad_logits, int topk, bool use_pre_softmax,

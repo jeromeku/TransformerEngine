@@ -36,6 +36,29 @@ void nvte_fused_topk_with_score_function_forward(
     const NVTETensor expert_bias, NVTETensor probs, NVTETensor routing_map,
     NVTETensor intermediate_output, cudaStream_t stream);
 
+/*! \brief Apply quantile-balancing top-k selection and sigmoid scoring.
+ *
+ *  Selection uses ``logits - beta`` while combine weights use sigmoid of the
+ *  original logits. The (topk + 1)-th adjusted logit is returned as ``alpha``
+ *  for the caller's separate column-quantile update.
+ *
+ *  \param[in]     logits          Logits from the gating GEMM.
+ *  \param[in]     beta            FP32 per-expert bias from the previous update step.
+ *  \param[in]     num_tokens      Number of tokens.
+ *  \param[in]     num_experts     Number of experts.
+ *  \param[in]     topk            Number of experts selected per token.
+ *  \param[in]     scaling_factor  Scaling factor applied after normalization.
+ *  \param[out]    probs           Sparse routing probabilities.
+ *  \param[out]    routing_map     Boolean routing map.
+ *  \param[out]    alpha           FP32 (topk + 1)-th adjusted logit per token.
+ *  \param[out]    intermediate_output  FP32 sigmoid output used by backward.
+ *  \param[in]     stream          CUDA stream used for the operation.
+ */
+void nvte_fused_qb_topk_with_score_function_forward(
+    const NVTETensor logits, const NVTETensor beta, int num_tokens, int num_experts, int topk,
+    float scaling_factor, NVTETensor probs, NVTETensor routing_map, NVTETensor alpha,
+    NVTETensor intermediate_output, cudaStream_t stream);
+
 /*! \brief Backward pass for fused topk + softmax/sigmoid.
  *
  *  \param[in]     routing_map     Routing map.

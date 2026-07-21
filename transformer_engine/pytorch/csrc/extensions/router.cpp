@@ -68,6 +68,53 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> fused_topk_with_score_function_fw
   return std::make_tuple(probs, routing_map, intermediate_output);
 }
 
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
+fused_qb_topk_with_score_function_fwd(at::Tensor logits, at::Tensor beta, int topk,
+                                      std::optional<float> scaling_factor,
+                                      std::string score_function) {
+  TORCH_CHECK(logits.dim() == 2, "logits must be a 2D tensor");
+  TORCH_CHECK(logits.is_cuda(), "logits must be a CUDA tensor");
+  TORCH_CHECK(logits.is_contiguous(), "logits must be contiguous");
+  TORCH_CHECK(beta.is_cuda(), "beta must be a CUDA tensor");
+  TORCH_CHECK(beta.is_contiguous(), "beta must be contiguous");
+  TORCH_CHECK(beta.scalar_type() == at::kFloat, "beta must be a float32 tensor");
+  TORCH_CHECK(beta.device() == logits.device(), "beta and logits must be on the same device");
+  TORCH_CHECK(score_function == "sigmoid",
+              "QB router fusion currently supports only the sigmoid score function");
+
+  const int num_tokens = logits.size(0);
+  const int num_experts = logits.size(1);
+  TORCH_CHECK(num_tokens > 0 && num_experts > 0,
+              "num_tokens and num_experts must be greater than 0");
+  TORCH_CHECK(topk > 0 && topk < num_experts,
+              "topk must be greater than 0 and smaller than num_experts");
+  TORCH_CHECK(beta.dim() == 1 && beta.numel() == num_experts,
+              "beta must have shape [num_experts]");
+
+  const float scaling_factor_value = scaling_factor.has_value() ? scaling_factor.value() : 1.0f;
+  at::Tensor probs = at::empty_like(logits);
+  at::Tensor routing_map =
+      at::empty({num_tokens, num_experts}, at::dtype(at::kBool).device(logits.device()));
+  at::Tensor alpha =
+      at::empty({num_tokens, 1}, at::dtype(at::kFloat).device(logits.device()));
+  at::Tensor intermediate_output =
+      at::empty({num_tokens, num_experts}, at::dtype(at::kFloat).device(logits.device()));
+
+  auto logits_cu = makeTransformerEngineTensor(logits);
+  auto beta_cu = makeTransformerEngineTensor(beta);
+  auto probs_cu = makeTransformerEngineTensor(probs);
+  auto routing_map_cu = makeTransformerEngineTensor(routing_map);
+  auto alpha_cu = makeTransformerEngineTensor(alpha);
+  auto intermediate_output_cu = makeTransformerEngineTensor(intermediate_output);
+
+  nvte_fused_qb_topk_with_score_function_forward(
+      logits_cu.data(), beta_cu.data(), num_tokens, num_experts, topk, scaling_factor_value,
+      probs_cu.data(), routing_map_cu.data(), alpha_cu.data(), intermediate_output_cu.data(),
+      at::cuda::getCurrentCUDAStream());
+
+  return std::make_tuple(probs, routing_map, alpha, intermediate_output);
+}
+
 void fused_topk_with_score_function_bwd(int num_tokens, int num_experts, at::Tensor routing_map,
                                         at::Tensor intermediate_output, at::Tensor grad_probs,
                                         at::Tensor grad_logits, int topk, bool use_pre_softmax,

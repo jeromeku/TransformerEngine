@@ -141,6 +141,93 @@ def fused_topk_with_score_function(
     )
 
 
+class FusedQBTopkScoreFunction(torch.autograd.Function):
+    """Fused quantile-balancing top-k selection with sigmoid scoring."""
+
+    @staticmethod
+    def forward(
+        ctx,
+        logits: torch.Tensor,
+        beta: torch.Tensor,
+        topk: int,
+        scaling_factor: Optional[float],
+        score_function: str,
+    ):
+        # pylint: disable=missing-function-docstring
+        tensor_shape = logits.shape
+        logits = logits.view(-1, tensor_shape[-1])
+        num_tokens, num_experts = logits.shape
+        probs, routing_map, alpha, intermediate_output = (
+            tex.fused_qb_topk_with_score_function_fwd(
+                logits,
+                beta,
+                topk,
+                scaling_factor,
+                score_function,
+            )
+        )
+        probs = probs.view(tensor_shape)
+        ctx.save_for_backward(routing_map, intermediate_output)
+        ctx.num_tokens = num_tokens
+        ctx.num_experts = num_experts
+        ctx.topk = topk
+        ctx.scaling_factor = scaling_factor
+        ctx.score_function = score_function
+        ctx.logits_dtype = logits.dtype
+        ctx.mark_non_differentiable(routing_map, alpha)
+        return probs, routing_map, alpha
+
+    @staticmethod
+    def backward(ctx, grad_probs, _grad_routing_map, _grad_alpha):
+        # pylint: disable=missing-function-docstring
+        routing_map, intermediate_output = ctx.saved_tensors
+        tensor_shape = grad_probs.shape
+        grad_probs = grad_probs.contiguous().view(-1, tensor_shape[-1])
+        grad_logits = torch.empty(
+            (ctx.num_tokens, ctx.num_experts), dtype=ctx.logits_dtype, device=grad_probs.device
+        )
+        tex.fused_topk_with_score_function_bwd(
+            ctx.num_tokens,
+            ctx.num_experts,
+            routing_map,
+            intermediate_output,
+            grad_probs,
+            grad_logits,
+            ctx.topk,
+            False,
+            ctx.scaling_factor,
+            ctx.score_function,
+        )
+        return grad_logits.view(tensor_shape), None, None, None, None
+
+
+def fused_qb_topk_with_score_function(
+    logits: torch.Tensor,
+    beta: torch.Tensor,
+    topk: int,
+    scaling_factor: Optional[float] = None,
+    score_function: str = "sigmoid",
+):
+    """Route on logits minus beta and score selected experts from unbiased logits.
+
+    Returns sparse probabilities, a boolean routing map, and the per-token
+    (topk + 1)-th adjusted logit used by the caller's QB column update.
+    """
+    if logits.dtype == torch.float64:
+        raise ValueError("Current TE does not support float64 router type.")
+    if beta.dtype != torch.float32:
+        raise ValueError("QB beta must be float32.")
+    if score_function != "sigmoid":
+        raise ValueError("QB router fusion currently supports only sigmoid scoring.")
+    return FusedQBTopkScoreFunction.apply(
+        logits,
+        beta,
+        topk,
+        scaling_factor,
+        score_function,
+    )
+
+
 class FusedComputeScoresForMoEAuxLoss(torch.autograd.Function):
     """
     Fused compute scores for MoE aux loss.
