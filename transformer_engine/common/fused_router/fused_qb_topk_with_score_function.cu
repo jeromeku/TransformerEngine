@@ -14,6 +14,20 @@
 namespace transformer_engine {
 namespace fused_router {
 
+/*
+ * CUDA execution model
+ * --------------------
+ * The 128-thread CTA contains four warps and assigns one independent token to
+ * each warp. A warp owns disjoint slices of dynamic shared memory and disjoint
+ * output rows, so warp-scoped barriers are sufficient inside the token path.
+ *
+ * Dynamic shared memory is partitioned as:
+ *   adjusted_scores[4][E] | selected_scores[4][K+1] | selected_indices[4][K+1]
+ *
+ * Selection is performed in FP32 on logit-beta. Scoring deliberately reloads
+ * the original logit and computes sigmoid(logit), because beta changes only
+ * the discrete assignment and must not enter combine weights or gradients.
+ */
 template <typename DataType, TopkFuncType TopkFunc = TopkFuncType::Naive>
 __global__ void fused_qb_topk_with_score_function_forward_kernel(
     const DataType *logits, const CompType *beta, int num_tokens, int num_experts, int topk,
@@ -113,12 +127,16 @@ void fused_qb_topk_with_score_function_forward_kernel_launcher(
   const size_t grid_size =
       (num_tokens + num_tokens_per_block - 1) / num_tokens_per_block;
   const size_t selection_k = topk + 1;
+  // Four warp-private score rows dominate shared-memory use. Check the
+  // device's opt-in per-block limit before setting the kernel attribute.
   const size_t shared_memory_size =
       num_experts * num_tokens_per_block * sizeof(CompType) +
       selection_k * num_tokens_per_block * sizeof(CompType) +
       selection_k * num_tokens_per_block * sizeof(int);
   check_shared_memory_capacity_num_experts(shared_memory_size, num_experts);
 
+  // Naive repeated-max selection is preferable for small K. The radix helper
+  // has O(E) work independent of K and wins once the requested K+1 reaches 16.
   if (selection_k < 16) {
     NVTE_CHECK_CUDA(cudaFuncSetAttribute(
         fused_qb_topk_with_score_function_forward_kernel<DataType, TopkFuncType::Naive>,

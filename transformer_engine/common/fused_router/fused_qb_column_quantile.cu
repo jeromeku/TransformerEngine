@@ -19,6 +19,18 @@ constexpr int kQBBlockRows = 8;
 constexpr int kQBRadixBits = 8;
 constexpr int kQBRadixBuckets = 1 << kQBRadixBits;
 
+/*
+ * Stage 1: residual construction and transpose
+ * --------------------------------------------
+ * scores is row-major [M, E], while the order statistic consumes one expert
+ * column at a time. A 32x8 CTA cooperatively moves a 32x32 tile: each thread
+ * handles four rows on load and four experts on store. Consecutive x lanes
+ * therefore read consecutive experts and write consecutive tokens.
+ *
+ * The shared tile has a 33-float stride. Padding the logical 32x32 tile by one
+ * column prevents the transposed shared-memory access from mapping a warp to
+ * the same bank repeatedly.
+ */
 __global__ void qb_residual_transpose_kernel(const float *scores, const float *alpha,
                                              int num_tokens, int num_experts,
                                              float *transposed_residual) {
@@ -46,6 +58,15 @@ __global__ void qb_residual_transpose_kernel(const float *scores, const float *a
   }
 }
 
+/*
+ * Stage 2: exact per-expert order statistic
+ * -----------------------------------------
+ * One 256-thread CTA owns one expert. The block scans that expert's contiguous
+ * token vector four times, resolving eight ordered-float bits per pass from
+ * most significant to least significant. Thread i also owns histogram bucket
+ * i during initialization; shared-memory atomicAdd combines counts from all
+ * threads. The algorithm emits only the threshold value, not K values/indices.
+ */
 __global__ void qb_column_quantile_kernel(const float *transposed_residual, int num_tokens,
                                           int num_experts, int column_k,
                                           float *beta_candidate) {
@@ -69,6 +90,8 @@ __global__ void qb_column_quantile_kernel(const float *transposed_residual, int 
     histogram[threadIdx.x] = 0;
     __syncthreads();
 
+    // Loop invariant: current_desired/current_mask describe the prefix of the
+    // column_k-th largest ordered-float bit pattern fixed by earlier passes.
     const unsigned int current_desired = desired;
     const unsigned int current_mask = desired_mask;
     for (int token = threadIdx.x; token < num_tokens; token += blockDim.x) {
@@ -81,6 +104,8 @@ __global__ void qb_column_quantile_kernel(const float *transposed_residual, int 
     __syncthreads();
 
     if (threadIdx.x == 0) {
+      // Descending bucket scan skips values known to be larger, then retains
+      // the rank within the selected bucket for the next eight-bit pass.
       int next_k = k_remaining;
       int selected_bucket = 0;
       for (int bucket = kQBRadixBuckets - 1; bucket >= 0; --bucket) {
@@ -124,6 +149,8 @@ void fused_qb_column_quantile(const Tensor &scores, const Tensor &alpha, int num
       reinterpret_cast<float *>(workspace.data.dptr));
   NVTE_CHECK_CUDA(cudaGetLastError());
 
+  // Launching both kernels on the same caller-provided stream establishes the
+  // workspace dependency without a device- or host-wide synchronization.
   qb_column_quantile_kernel<<<num_experts, kQBRadixBuckets, 0, stream>>>(
       reinterpret_cast<const float *>(workspace.data.dptr), num_tokens, num_experts, column_k,
       reinterpret_cast<float *>(beta_candidate.data.dptr));
