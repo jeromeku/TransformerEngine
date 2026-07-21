@@ -59,6 +59,25 @@ void nvte_fused_qb_topk_with_score_function_forward(
     float scaling_factor, NVTETensor probs, NVTETensor routing_map, NVTETensor alpha,
     NVTETensor intermediate_output, cudaStream_t stream);
 
+/*! \brief Compute the QB per-expert column quantile.
+ *
+ *  Computes the column_k-th largest value of scores[token, expert] -
+ *  alpha[token] independently for every expert. All tensors are FP32 and
+ *  the operation is non-differentiable.
+ *
+ *  \param[in]     scores          Detached FP32 scores with shape [num_tokens, num_experts].
+ *  \param[in]     alpha           FP32 per-token row threshold with num_tokens elements.
+ *  \param[in]     num_tokens      Number of tokens.
+ *  \param[in]     num_experts     Number of experts.
+ *  \param[in]     column_k        One-based descending column order statistic.
+ *  \param[out]    workspace       FP32 transposed residual workspace [num_experts, num_tokens].
+ *  \param[out]    beta_candidate  FP32 output with shape [num_experts].
+ *  \param[in]     stream          CUDA stream used for the operation.
+ */
+void nvte_fused_qb_column_quantile(const NVTETensor scores, const NVTETensor alpha, int num_tokens,
+                                   int num_experts, int column_k, NVTETensor workspace,
+                                   NVTETensor beta_candidate, cudaStream_t stream);
+
 /*! \brief Backward pass for fused topk + softmax/sigmoid.
  *
  *  \param[in]     routing_map     Routing map.

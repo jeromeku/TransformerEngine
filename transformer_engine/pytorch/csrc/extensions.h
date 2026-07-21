@@ -36,6 +36,8 @@ fused_qb_topk_with_score_function_fwd(at::Tensor logits, at::Tensor beta, int to
                                       std::optional<float> scaling_factor,
                                       std::string score_function);
 
+at::Tensor fused_qb_column_quantile(at::Tensor scores, at::Tensor alpha, int topk);
+
 void fused_topk_with_score_function_bwd(int num_tokens, int num_experts, at::Tensor routing_map,
                                         at::Tensor intermediate_output, at::Tensor grad_probs,
                                         at::Tensor grad_logits, int topk, bool use_pre_softmax,

@@ -228,6 +228,19 @@ def fused_qb_topk_with_score_function(
     )
 
 
+def fused_qb_column_quantile(
+    scores: torch.Tensor,
+    alpha: torch.Tensor,
+    topk: int,
+) -> torch.Tensor:
+    """Compute the next-step QB beta candidate for every expert.
+
+    The inputs must be detached, contiguous FP32 CUDA tensors. The selected
+    rank is derived from the balanced expert load: num_tokens * topk / num_experts + 1.
+    """
+    return tex.fused_qb_column_quantile(scores, alpha, topk)
+
+
 class FusedComputeScoresForMoEAuxLoss(torch.autograd.Function):
     """
     Fused compute scores for MoE aux loss.

@@ -462,6 +462,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         &transformer_engine::pytorch::fused_qb_topk_with_score_function_fwd, py::arg("logits"),
         py::arg("beta"), py::arg("topk"), py::arg("scaling_factor"), py::arg("score_function"),
         "Fused quantile-balancing topk with score function fwd");
+  m.def("fused_qb_column_quantile", &transformer_engine::pytorch::fused_qb_column_quantile,
+        py::arg("scores"), py::arg("alpha"), py::arg("topk"),
+        "Fused quantile-balancing column quantile");
   m.def("fused_topk_with_score_function_bwd",
         &transformer_engine::pytorch::fused_topk_with_score_function_bwd, py::arg("num_tokens"),
         py::arg("num_experts"), py::arg("routing_map"), py::arg("intermediate_output"),

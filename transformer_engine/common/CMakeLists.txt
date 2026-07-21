@@ -202,6 +202,7 @@ list(APPEND transformer_engine_cuda_sources
      fused_softmax/scaled_aligned_causal_masked_softmax.cu
      fused_rope/fused_rope.cu
      fused_router/fused_moe_aux_loss.cu
+     fused_router/fused_qb_column_quantile.cu
      fused_router/fused_qb_topk_with_score_function.cu
      fused_router/fused_score_for_moe_aux_loss.cu
      fused_router/fused_topk_with_score_function.cu
