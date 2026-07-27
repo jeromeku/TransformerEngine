@@ -60,6 +60,22 @@ void fused_attn_fp8_fwd_impl(
   NVTE_CHECK(!is_mxfp8 || cudnn_runtime_version >= 92100,
              "MXFP8 fused attention requires cuDNN 9.21.0 or later!");
 
+  // THD (packed varlen). v1 handles the gap-free case only: cu_seqlens and cu_seqlens_padded
+  // coincide, so element offsets are built from the cu_seqlens this entry point already
+  // receives. Physical inter-sequence gaps need cu_seqlens_*_padded threaded through this
+  // signature -- that is v1.1 (06-implementation-plan.md, Phase G).
+  const bool is_ragged = (nvte_get_qkv_format(qkv_layout) == NVTE_QKV_Format::NVTE_THD);
+  const bool thd_trace = transformer_engine::getenv<bool>("NVTE_FP8_THD_TRACE", false);
+  if (thd_trace)
+    fprintf(stderr, "[thd] impl enter: b=%ld h=%ld hg=%ld s_q=%ld s_kv=%ld d=%ld ragged=%d pad=%d\n",
+            (long)b, (long)h, (long)hg, (long)s_q, (long)s_kv, (long)d_qk, (int)is_ragged,
+            (int)is_padding);
+  NVTE_CHECK(!is_ragged || is_padding,
+             "FP8 fused attention with THD requires a padding or padding_causal mask!");
+  // Match the F16 path: 64-bit wherever the runtime allows, rather than deriving the width from
+  // problem size. See 06-audit-response.md, B5.
+  const DType ragged_offset_type = cudnn_runtime_version >= 90500 ? DType::kInt64 : DType::kInt32;
+
   try {
     FADescriptor_v1 descriptor{b,
                                h,
@@ -122,7 +138,12 @@ void fused_attn_fp8_fwd_impl(
                    std::shared_ptr<fe::graph::Tensor_attributes>,   // seq_q
                    std::shared_ptr<fe::graph::Tensor_attributes>,   // seq_kv
                    std::shared_ptr<fe::graph::Tensor_attributes>,   // dropout_seed
-                   std::shared_ptr<fe::graph::Tensor_attributes>>;  // dropout_offset
+                   std::shared_ptr<fe::graph::Tensor_attributes>,   // dropout_offset
+                   std::shared_ptr<fe::graph::Tensor_attributes>,   // offset_q
+                   std::shared_ptr<fe::graph::Tensor_attributes>,   // offset_k
+                   std::shared_ptr<fe::graph::Tensor_attributes>,   // offset_v
+                   std::shared_ptr<fe::graph::Tensor_attributes>,   // offset_o
+                   std::shared_ptr<fe::graph::Tensor_attributes>>;  // offset_stats
 
     using CacheType = std::map<FADescriptor_v1, graph_and_tensors>;
     static thread_local CacheType sdpa_fp8_fprop_cache;
@@ -147,6 +168,8 @@ void fused_attn_fp8_fwd_impl(
       std::shared_ptr<fe::graph::Tensor_attributes> descale_s, scale_s, scale_o;
       std::shared_ptr<fe::graph::Tensor_attributes> bias, softmax_offset, seq_q, seq_kv;
       std::shared_ptr<fe::graph::Tensor_attributes> dropout_seed, dropout_offset;
+      std::shared_ptr<fe::graph::Tensor_attributes> offset_q, offset_k, offset_v, offset_o,
+          offset_stats;
 
       // Q, K, V, attn_scale
       std::vector<int64_t> q_strides(4), k_strides(4), v_strides(4);
@@ -167,6 +190,28 @@ void fused_attn_fp8_fwd_impl(
                                 .set_dim({b, hg, s_kv, d_v})
                                 .set_stride(v_strides)
                                 .set_data_type(qkv_tensor_type));
+      // THD (packed varlen): Q/K/V/O/Stats keep their dense {b,h,s,d} dims and BSHD-style
+      // strides, and a per-batch ragged offset displaces each sequence's base pointer into the
+      // packed buffer. cuDNN requires a padding-family mask alongside these
+      // (cudnn_frontend sdpa_support_surface.h), which the selector already enforces.
+      if (is_ragged) {
+        auto make_offset = [&](const char* name) {
+          return mha_graph->tensor(fe::graph::Tensor_attributes()
+                                       .set_name(name)
+                                       .set_dim({b + 1, 1, 1, 1})
+                                       .set_stride({1, 1, 1, 1})
+                                       .set_data_type(get_cudnn_fe_dtype(ragged_offset_type)));
+        };
+        offset_q = make_offset("offset_q");
+        offset_k = make_offset("offset_k");
+        offset_v = make_offset("offset_v");
+        offset_o = make_offset("offset_o");
+        offset_stats = make_offset("offset_stats");
+        Q->set_ragged_offset(offset_q);
+        K->set_ragged_offset(offset_k);
+        V->set_ragged_offset(offset_v);
+      }
+
       attn_scale = mha_graph->tensor(fe::graph::Tensor_attributes()
                                          .set_name("attn_scale")
                                          .set_dim({1, 1, 1, 1})
@@ -323,6 +368,9 @@ void fused_attn_fp8_fwd_impl(
           .set_dim({b, h, s_q, d_v})
           .set_stride(o_strides)
           .set_data_type(o_tensor_type);
+      if (is_ragged) {
+        O->set_ragged_offset(offset_o);
+      }
       amax_o->set_output(!is_mxfp8)
           .set_dim({1, 1, 1, 1})
           .set_stride({1, 1, 1, 1})
@@ -331,7 +379,14 @@ void fused_attn_fp8_fwd_impl(
       Stats->set_output(true)
           .set_data_type(fe::DataType_t::FLOAT)
           .set_dim({b, h, s_q, 1})
-          .set_stride({h * s_q, s_q, 1, 1});
+          .set_stride(is_ragged ? std::vector<int64_t>{h * s_q, 1, h, 1}
+                                : std::vector<int64_t>{h * s_q, s_q, 1, 1});
+      if (is_ragged) {
+        // NB: the Stats ragged-offset multiplier is h, not h*d -- Stats is one value per
+        // (token, head). Getting this wrong is invisible in the forward output but corrupts the
+        // backward, which consumes Stats as LSE.
+        Stats->set_ragged_offset(offset_stats);
+      }
 
       std::tuple<std::shared_ptr<fe::graph::Tensor_attributes>,  // Q
                  std::shared_ptr<fe::graph::Tensor_attributes>,  // K
@@ -359,6 +414,10 @@ void fused_attn_fp8_fwd_impl(
           is_padding ? std::make_tuple(seq_q, seq_kv) : std::make_tuple(nullptr, nullptr);
       auto dropout_tuple = is_dropout ? std::make_tuple(dropout_seed, dropout_offset)
                                       : std::make_tuple(nullptr, nullptr);
+      auto ragged_tuple = is_ragged
+                              ? std::make_tuple(offset_q, offset_k, offset_v, offset_o,
+                                                offset_stats)
+                              : std::make_tuple(nullptr, nullptr, nullptr, nullptr, nullptr);
 
       NVTE_CHECK_CUDNN_FE(mha_graph->validate());
       NVTE_CHECK_CUDNN_FE(mha_graph->build_operation_graph(handle));
@@ -367,7 +426,7 @@ void fused_attn_fp8_fwd_impl(
       NVTE_CHECK_CUDNN_FE(mha_graph->build_plans(handle));
       auto return_tuple =
           std::tuple_cat(std::make_tuple(mha_graph), key_tensors_tuple, Stats_tuple, bias_tuple,
-                         softmax_offset_tuple, padding_tuple, dropout_tuple);
+                         softmax_offset_tuple, padding_tuple, dropout_tuple, ragged_tuple);
       cache.insert({descriptor, return_tuple});
 
       return return_tuple;
@@ -375,14 +434,23 @@ void fused_attn_fp8_fwd_impl(
 
     auto [mha_graph, Q, K, V, descale_q, descale_k, descale_v, descale_s, scale_s, scale_o,
           attn_scale, O, amax_s, amax_o, Stats, bias, softmax_offset, seq_q, seq_kv, dropout_seed,
-          dropout_offset] = get_graph(sdpa_fp8_fprop_cache, descriptor);
+          dropout_offset, offset_q, offset_k, offset_v, offset_o,
+          offset_stats] = get_graph(sdpa_fp8_fprop_cache, descriptor);
 
+    if (thd_trace) fprintf(stderr, "[thd] graph built ok\n");
     auto plan_workspace_size = mha_graph->get_workspace_size();
 
-    // Exit to request upper level API to allocate memory if needed
-    size_t actual_seqlen_workspace_size = 2 * b * sizeof(int32_t);
+    // Exit to request upper level API to allocate memory if needed.
+    // Each sub-allocation is padded to its own alignment: the ragged offsets are int64 on
+    // cuDNN >= 9.5, so the seqlen block must be aligned before they are appended.
+    size_t actual_seqlen_workspace_size = alignTo<16>(2 * b * sizeof(int32_t));
+    const size_t num_bytes_per_ragged_offset =
+        alignTo<16>(((b + 1) * typeToNumBits(ragged_offset_type)) / 8);
+    // Q, K, V, O, Stats
+    const size_t ragged_offsets_workspace_size = is_ragged ? 5 * num_bytes_per_ragged_offset : 0;
     if (workspace == nullptr) {
-      *workspace_size = plan_workspace_size + actual_seqlen_workspace_size;
+      *workspace_size =
+          plan_workspace_size + actual_seqlen_workspace_size + ragged_offsets_workspace_size;
       return;
     }
 
@@ -428,6 +496,40 @@ void fused_attn_fp8_fwd_impl(
       NVTE_CHECK_CUDA(cudaGetLastError());
       variant_pack[seq_q] = devActualSeqlenQ;
       variant_pack[seq_kv] = devActualSeqlenKV;
+
+      if (is_ragged) {
+        // Element offsets into the packed buffers: offsets_x[i] = mult_x * cu_seqlens[i].
+        // The multipliers are layout-specific (h*d for separate Q/K/V, 3*h*d for t3hd/th3d,
+        // 2*h_kv*d for the KV-packed layouts, and h -- not h*d -- for Stats), which is exactly
+        // what get_ragged_offset_multipliers encodes for the F16 path.
+        int8_t* devOffsets = static_cast<int8_t*>(workspace) + plan_workspace_size +
+                             actual_seqlen_workspace_size;
+        void* devOffsetsQ = devOffsets;
+        void* devOffsetsK = devOffsets + num_bytes_per_ragged_offset;
+        void* devOffsetsV = devOffsets + 2 * num_bytes_per_ragged_offset;
+        void* devOffsetsO = devOffsets + 3 * num_bytes_per_ragged_offset;
+        void* devOffsetsS = devOffsets + 4 * num_bytes_per_ragged_offset;
+
+        const NVTE_QKV_Layout_Group layout_group = nvte_get_qkv_layout_group(qkv_layout);
+        // v1: no physical gaps, so cu_seqlens doubles as cu_seqlens_padded. The kernel derives
+        // the per-tensor multipliers from layout_group/h/hg/d -- h*d for separate Q/K/V,
+        // 3*h*d for t3hd/th3d, 2*hg*d for the KV-packed layouts, and h (not h*d) for Stats.
+        cu_seqlens_padded_to_offsets<<<grid, nthreads_per_block, 0, stream>>>(
+            layout_group, b, b, h, hg, d_qk, d_v,
+            static_cast<const int32_t*>(devPtrcuSeqlensQ),
+            static_cast<const int32_t*>(devPtrcuSeqlensKV), ragged_offset_type, devOffsetsQ,
+            devOffsetsK, devOffsetsV, devOffsetsO, devOffsetsS);
+        NVTE_CHECK_CUDA(cudaGetLastError());
+
+        if (thd_trace)
+          fprintf(stderr, "[thd] offsets launched, ws=%zu seq_ws=%zu per_off=%zu\n",
+                  plan_workspace_size, actual_seqlen_workspace_size, num_bytes_per_ragged_offset);
+        variant_pack[offset_q] = devOffsetsQ;
+        variant_pack[offset_k] = devOffsetsK;
+        variant_pack[offset_v] = devOffsetsV;
+        variant_pack[offset_o] = devOffsetsO;
+        variant_pack[offset_stats] = devOffsetsS;
+      }
     }
 
     if (is_dropout) {
@@ -439,7 +541,9 @@ void fused_attn_fp8_fwd_impl(
       variant_pack[softmax_offset] = devPtrSoftmaxOffset;
     }
 
+    if (thd_trace) fprintf(stderr, "[thd] about to execute\n");
     NVTE_CHECK_CUDNN_FE(mha_graph->execute(handle, variant_pack, workspace));
+    if (thd_trace) fprintf(stderr, "[thd] execute returned\n");
   } catch (cudnn_frontend::cudnnException& e) {
     NVTE_ERROR(e.what());
   }
@@ -1100,6 +1204,16 @@ void fused_attn_fp8_fwd(
     NVTETensorPack* Aux_CTX_Tensors, const Tensor* cu_seqlens_q, const Tensor* cu_seqlens_kv,
     const Tensor* rng_state, Tensor* workspace, cudaStream_t stream, cudnnHandle_t handle) {
   using namespace transformer_engine;
+  // THD: Q is physically [t, h, d], so shape[0] is the total packed token count. The F16 path
+  // receives num_tokens_q/kv as explicit arguments (fused_attn_f16_arbitrary_seqlen.cu:1240);
+  // the FP8 signature does not, so derive them here rather than widening the public API.
+  const bool trace_w = transformer_engine::getenv<bool>("NVTE_FP8_THD_TRACE", false);
+  if (trace_w) fprintf(stderr, "[thd] fp8_fwd wrapper enter\n");
+  const bool is_ragged_fmt = (nvte_get_qkv_format(qkv_layout) == NVTE_QKV_Format::NVTE_THD);
+  const size_t num_tokens_q = is_ragged_fmt ? input_Q->data.shape[0] : 0;
+  if (trace_w)
+    fprintf(stderr, "[thd] wrapper: ragged=%d t_q=%zu aux_size=%zu\n", (int)is_ragged_fmt,
+            num_tokens_q, (size_t)Aux_CTX_Tensors->size);
   void *devPtrQ = nullptr, *devPtrK = nullptr, *devPtrV = nullptr;
   void *devPtrDescaleQ = nullptr, *devPtrDescaleK = nullptr, *devPtrDescaleV = nullptr;
   void *devPtrO = nullptr, *devPtrAmaxO = nullptr, *devPtrScaleO = nullptr;
@@ -1130,7 +1244,13 @@ void fused_attn_fp8_fwd(
     int i = 0;
     Tensor* output_M = convertNVTETensorCheck(Aux_CTX_Tensors->tensors[i++]);
     output_M->data.dptr = nullptr;
-    output_M->data.shape = {batch, num_attn_heads, max_seqlen_q, 1};
+    // Softmax stats are one value per (token, head). Under THD the caller allocates a packed
+    // [t, h, 1] buffer -- the dense {b, h, s_q, 1} shape would be both the wrong size and the
+    // wrong layout for a ragged graph, and the mismatch faults host-side in fused_attn_fwd.
+    // Matches the F16 path (fused_attn_f16_arbitrary_seqlen.cu:1146).
+    output_M->data.shape = is_ragged_fmt
+                               ? std::vector<size_t>{num_tokens_q, num_attn_heads, 1}
+                               : std::vector<size_t>{batch, num_attn_heads, max_seqlen_q, 1};
     output_M->data.dtype = DType::kFloat32;
     Tensor* output_rng_state = convertNVTETensorCheck(Aux_CTX_Tensors->tensors[i++]);
     output_rng_state->data.dptr = nullptr;
