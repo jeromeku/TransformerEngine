@@ -252,6 +252,15 @@ NVTE_Fused_Attn_Backend nvte_get_fused_attn_backend(
   const bool supported_ragged_offset_size =
       (!requires_64bit_ragged_offset || cudnn_runtime_version >= 90500);
 
+  // FP8 + THD (packed varlen) is under development. The ragged-offset plumbing in
+  // fused_attn_fp8.cu is incomplete, so this must stay CLOSED by default: a capability query is
+  // an execution contract and must never advertise a path whose expected result is a fault.
+  // NVTE_FP8_THD_EXPERIMENTAL=1 opens it for the development test suite only. Delete this gate --
+  // do not merely flip its default -- once forward and backward both pass.
+  // See claude/flashattn_varlen_fp8/06-implementation-plan.md, Phase B/C/E.
+  static const bool fp8_thd_experimental =
+      transformer_engine::getenv<bool>("NVTE_FP8_THD_EXPERIMENTAL", false);
+
   if ((q_dtype == NVTEDType::kNVTEFloat8E4M3 || q_dtype == NVTEDType::kNVTEFloat8E5M2) &&
       sm_arch_ >= 90 && bias_type == NVTE_Bias_Type::NVTE_NO_BIAS &&
       (
@@ -286,8 +295,17 @@ NVTE_Fused_Attn_Backend nvte_get_fused_attn_backend(
         softmax_type == NVTE_Softmax_Type::NVTE_VANILLA_SOFTMAX) ||
        (cudnn_runtime_version >= 92100 &&
         (qkv_format == NVTE_QKV_Format::NVTE_BSHD || qkv_format == NVTE_QKV_Format::NVTE_SBHD ||
-         qkv_format == NVTE_QKV_Format::NVTE_BHSD))) &&
-      !requires_64bit_ragged_offset &&
+         qkv_format == NVTE_QKV_Format::NVTE_BHSD ||
+         // EXPERIMENTAL: THD, mirroring the F16 branch's 9.1 rule. Ragged offsets require a
+         // padding-family mask (cuDNN frontend sdpa_support_surface.h), and FP8 ragged *backward*
+         // is Blackwell-only (sdpa_fp8_bwd.h), hence the is_training/sm_arch condition.
+         (fp8_thd_experimental && qkv_format == NVTE_QKV_Format::NVTE_THD && sm_arch_ >= 90 &&
+          (!is_training || sm_arch_ >= 100) &&
+          (attn_mask_type == NVTE_Mask_Type::NVTE_PADDING_MASK ||
+           attn_mask_type == NVTE_Mask_Type::NVTE_PADDING_CAUSAL_MASK))))) &&
+      // The F16 branch uses the version-aware form; the FP8 branch rejected int64 offsets
+      // unconditionally, which silently disabled any THD problem large enough to need them.
+      supported_ragged_offset_size &&
       // 9.10.0: known bugs with SDPA FP8
       (cudnn_runtime_version != 91000) && !return_max_logit) {
     backend = NVTE_Fused_Attn_Backend::NVTE_FP8;
