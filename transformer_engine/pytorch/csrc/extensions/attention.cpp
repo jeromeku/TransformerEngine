@@ -140,8 +140,10 @@ std::vector<py::object> fused_attn_fwd(
   te_V = makeTransformerEngineTensor(V, none);
   const DType qkv_type = te_Q.dtype();
 
+  if (THDT()) fprintf(stderr, "[thd] P1 qkv wrappers ok, q rank=%zu\n", te_Q.shape().ndim);
   // create S tensor
   auto [te_S, py_S, _] = quantizer_helper(s_quantizer, {0}, DType::kFloat32, false, std::nullopt);
+  if (THDT()) fprintf(stderr, "[thd] P2 te_S ok\n");
 
   // create O tensor
   std::unique_ptr<Quantizer> O_quantizer = convert_quantizer(o_quantizer);
@@ -153,10 +155,14 @@ std::vector<py::object> fused_attn_fwd(
   NVTE_QKV_Format q_format = nvte_get_q_format(qkv_layout);
   AttentionShape o_parsed(q_format, o_shape_tmp.data());
   size_t h = o_parsed.h(), d = o_parsed.d();
+  if (THDT()) fprintf(stderr, "[thd] P3 o_shape_tmp n=%zu h=%zu d=%zu o_format=%d\n",
+                      o_shape_tmp.size(), h, d, (int)o_format);
   o_parsed.to_format(o_format, o_shape.data());
+  if (THDT()) fprintf(stderr, "[thd] P4 to_format ok, o_shape n=%zu\n", o_shape.size());
   const DType fake_dtype_te = GetTransformerEngineDType(fake_dtype);
   auto [te_O, py_O, o_amax_buf] =
       quantizer_helper(o_quantizer, o_shape, fake_dtype_te, true, std::nullopt);
+  if (THDT()) fprintf(stderr, "[thd] P5 te_O ok\n");
 
   // construct NVTE tensors
   TensorWrapper te_Bias;

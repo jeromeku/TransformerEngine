@@ -305,6 +305,19 @@ def fused_attn_fwd(
 
     # execute kernel
 
+    import os as _os
+    if _os.getenv("NVTE_FP8_THD_TRACE") == "1":
+        def _d(n, t):
+            print(f"[py] {n:<22} type={type(t).__name__} shape={getattr(t,'shape',None)} "
+                  f"dtype={getattr(t,'dtype',None)}", flush=True)
+        for _n, _t in [("q", q), ("k", k), ("v", v), ("cu_seqlens_q", cu_seqlens_q),
+                       ("cu_seqlens_kv", cu_seqlens_kv), ("cu_seqlens_q_padded", cu_seqlens_q_padded),
+                       ("cu_seqlens_kv_padded", cu_seqlens_kv_padded), ("s_quantizer", s_quantizer),
+                       ("o_quantizer", o_quantizer)]:
+            _d(_n, _t)
+        print(f"[py] max_seqlen_q={max_seqlen_q} max_seqlen_kv={max_seqlen_kv} "
+              f"layout={qkv_layout} backend={fused_attention_backend} "
+              f"rng_elts={rng_elts_per_thread}", flush=True)
     output_tensors = tex.fused_attn_fwd(
         max_seqlen_q,
         max_seqlen_kv,
