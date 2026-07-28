@@ -8,8 +8,6 @@
 #include "common.h"
 #include "pybind.h"
 
-#define THDT() (std::getenv("NVTE_FP8_THD_TRACE") && std::getenv("NVTE_FP8_THD_TRACE")[0]=='1')
-
 namespace {
 
 constexpr int block_size = 512;
@@ -19,15 +17,23 @@ void mha_fill(const transformer_engine::TensorWrapper &self, const at::Tensor &s
   std::vector<size_t> shape = transformer_engine::pytorch::convertShape(self.shape());
 
   auto max_tokens = shape[0];
-  auto fcd_size = 1;
-  for (size_t i = 1; i <= shape.size(); i++) {
+  // NB: the bound was `i <= shape.size()`, which read one element past the end of the vector
+  // and multiplied the garbage into fcd_size (observed: rank-3 [640,4,128] gave 164352 instead
+  // of 512, having picked up shape[3]=321). size_t rather than int, so the product cannot
+  // overflow on large packed batches.
+  size_t fcd_size = 1;
+  for (size_t i = 1; i < shape.size(); i++) {
     fcd_size *= shape[i];
   }
 
   NVTE_CHECK(fcd_size % block_size == 0, "input size not aligned to block size");
 
   size_t element_size_bits = transformer_engine::pytorch::typeToNumBits(self.dtype());
-  int32_t start_row = start_index.data_ptr<int32_t>()[0];
+  // start_index is a slice of cu_seqlens, which lives on the device. data_ptr()[0] dereferenced
+  // it from host code, which segfaults. item<>() performs the device-to-host copy. It syncs, but
+  // this path already issues a memset and the alternative branch at the call sites is a
+  // full fill_(0), so the cost is in line with the surrounding code.
+  const int32_t start_row = start_index.item<int32_t>();
   void *base_ptr = static_cast<char *>(self.get_rowwise_data().data_ptr) +
                    static_cast<size_t>(start_row) * fcd_size * element_size_bits / 8;
   size_t num_rows_to_zero = max_tokens - start_row;
@@ -140,10 +146,8 @@ std::vector<py::object> fused_attn_fwd(
   te_V = makeTransformerEngineTensor(V, none);
   const DType qkv_type = te_Q.dtype();
 
-  if (THDT()) fprintf(stderr, "[thd] P1 qkv wrappers ok, q rank=%zu\n", te_Q.shape().ndim);
   // create S tensor
   auto [te_S, py_S, _] = quantizer_helper(s_quantizer, {0}, DType::kFloat32, false, std::nullopt);
-  if (THDT()) fprintf(stderr, "[thd] P2 te_S ok\n");
 
   // create O tensor
   std::unique_ptr<Quantizer> O_quantizer = convert_quantizer(o_quantizer);
@@ -155,14 +159,10 @@ std::vector<py::object> fused_attn_fwd(
   NVTE_QKV_Format q_format = nvte_get_q_format(qkv_layout);
   AttentionShape o_parsed(q_format, o_shape_tmp.data());
   size_t h = o_parsed.h(), d = o_parsed.d();
-  if (THDT()) fprintf(stderr, "[thd] P3 o_shape_tmp n=%zu h=%zu d=%zu o_format=%d\n",
-                      o_shape_tmp.size(), h, d, (int)o_format);
   o_parsed.to_format(o_format, o_shape.data());
-  if (THDT()) fprintf(stderr, "[thd] P4 to_format ok, o_shape n=%zu\n", o_shape.size());
   const DType fake_dtype_te = GetTransformerEngineDType(fake_dtype);
   auto [te_O, py_O, o_amax_buf] =
       quantizer_helper(o_quantizer, o_shape, fake_dtype_te, true, std::nullopt);
-  if (THDT()) fprintf(stderr, "[thd] P5 te_O ok\n");
 
   // construct NVTE tensors
   TensorWrapper te_Bias;
@@ -251,7 +251,6 @@ std::vector<py::object> fused_attn_fwd(
   // create workspace
   TensorWrapper workspace;
 
-  if (THDT()) fprintf(stderr, "[thd] binding: before sizing call\n");
   // populate tensors with appropriate shapes and dtypes
   NVTE_SCOPED_GIL_RELEASE({
     nvte_fused_attn_fwd(
@@ -264,7 +263,6 @@ std::vector<py::object> fused_attn_fwd(
         window_size[1], bottom_right_diagonal, workspace.data(), at::cuda::getCurrentCUDAStream());
   });
 
-  if (THDT()) fprintf(stderr, "[thd] binding: sizing call returned\n");
   // allocate memory for workspace and auxiliary output tensors
   auto workspace_data = allocateSpace(workspace.shape(), workspace.dtype());
   workspace =
@@ -286,12 +284,6 @@ std::vector<py::object> fused_attn_fwd(
   size_t i = 0;
   at::Tensor output_tensor;
   // intermediate softmax stats tensor S
-  if (THDT()) {
-    auto sh = nvte_shape_to_vector(nvte_tensor_shape(nvte_aux_tensor_pack.tensors[i]));
-    fprintf(stderr, "[thd] binding: aux[0] S rank=%zu dims=", sh.size());
-    for (auto d : sh) fprintf(stderr, "%zu,", d);
-    fprintf(stderr, "\n");
-  }
   output_tensor =
       allocateSpace(nvte_shape_to_vector(nvte_tensor_shape(nvte_aux_tensor_pack.tensors[i])),
                     static_cast<DType>(nvte_tensor_type(nvte_aux_tensor_pack.tensors[i])), false);
@@ -316,7 +308,6 @@ std::vector<py::object> fused_attn_fwd(
     set_tensor_param(i++, SoftmaxOffset.value());
   }
 
-  if (THDT()) fprintf(stderr, "[thd] binding: aux allocated, before execute call\n");
   // execute the kernel
   NVTE_SCOPED_GIL_RELEASE({
     nvte_fused_attn_fwd(

@@ -65,11 +65,6 @@ void fused_attn_fp8_fwd_impl(
   // receives. Physical inter-sequence gaps need cu_seqlens_*_padded threaded through this
   // signature -- that is v1.1 (06-implementation-plan.md, Phase G).
   const bool is_ragged = (nvte_get_qkv_format(qkv_layout) == NVTE_QKV_Format::NVTE_THD);
-  const bool thd_trace = transformer_engine::getenv<bool>("NVTE_FP8_THD_TRACE", false);
-  if (thd_trace)
-    fprintf(stderr, "[thd] impl enter: b=%ld h=%ld hg=%ld s_q=%ld s_kv=%ld d=%ld ragged=%d pad=%d\n",
-            (long)b, (long)h, (long)hg, (long)s_q, (long)s_kv, (long)d_qk, (int)is_ragged,
-            (int)is_padding);
   NVTE_CHECK(!is_ragged || is_padding,
              "FP8 fused attention with THD requires a padding or padding_causal mask!");
   // Match the F16 path: 64-bit wherever the runtime allows, rather than deriving the width from
@@ -437,7 +432,6 @@ void fused_attn_fp8_fwd_impl(
           dropout_offset, offset_q, offset_k, offset_v, offset_o,
           offset_stats] = get_graph(sdpa_fp8_fprop_cache, descriptor);
 
-    if (thd_trace) fprintf(stderr, "[thd] graph built ok\n");
     auto plan_workspace_size = mha_graph->get_workspace_size();
 
     // Exit to request upper level API to allocate memory if needed.
@@ -521,9 +515,6 @@ void fused_attn_fp8_fwd_impl(
             devOffsetsK, devOffsetsV, devOffsetsO, devOffsetsS);
         NVTE_CHECK_CUDA(cudaGetLastError());
 
-        if (thd_trace)
-          fprintf(stderr, "[thd] offsets launched, ws=%zu seq_ws=%zu per_off=%zu\n",
-                  plan_workspace_size, actual_seqlen_workspace_size, num_bytes_per_ragged_offset);
         variant_pack[offset_q] = devOffsetsQ;
         variant_pack[offset_k] = devOffsetsK;
         variant_pack[offset_v] = devOffsetsV;
@@ -541,9 +532,7 @@ void fused_attn_fp8_fwd_impl(
       variant_pack[softmax_offset] = devPtrSoftmaxOffset;
     }
 
-    if (thd_trace) fprintf(stderr, "[thd] about to execute\n");
     NVTE_CHECK_CUDNN_FE(mha_graph->execute(handle, variant_pack, workspace));
-    if (thd_trace) fprintf(stderr, "[thd] execute returned\n");
   } catch (cudnn_frontend::cudnnException& e) {
     NVTE_ERROR(e.what());
   }
@@ -1207,13 +1196,8 @@ void fused_attn_fp8_fwd(
   // THD: Q is physically [t, h, d], so shape[0] is the total packed token count. The F16 path
   // receives num_tokens_q/kv as explicit arguments (fused_attn_f16_arbitrary_seqlen.cu:1240);
   // the FP8 signature does not, so derive them here rather than widening the public API.
-  const bool trace_w = transformer_engine::getenv<bool>("NVTE_FP8_THD_TRACE", false);
-  if (trace_w) fprintf(stderr, "[thd] fp8_fwd wrapper enter\n");
   const bool is_ragged_fmt = (nvte_get_qkv_format(qkv_layout) == NVTE_QKV_Format::NVTE_THD);
   const size_t num_tokens_q = is_ragged_fmt ? input_Q->data.shape[0] : 0;
-  if (trace_w)
-    fprintf(stderr, "[thd] wrapper: ragged=%d t_q=%zu aux_size=%zu\n", (int)is_ragged_fmt,
-            num_tokens_q, (size_t)Aux_CTX_Tensors->size);
   void *devPtrQ = nullptr, *devPtrK = nullptr, *devPtrV = nullptr;
   void *devPtrDescaleQ = nullptr, *devPtrDescaleK = nullptr, *devPtrDescaleV = nullptr;
   void *devPtrO = nullptr, *devPtrAmaxO = nullptr, *devPtrScaleO = nullptr;
@@ -1291,8 +1275,11 @@ void fused_attn_fp8_fwd(
   size_t workspace_size = 0;
 
   NVTE_QKV_Format qkv_format = nvte_get_qkv_format(qkv_layout);
+  // THD is admitted here as well: the impl now emits ragged offsets for Q/K/V/O/Stats. The
+  // capability query (nvte_get_fused_attn_backend) is the gate that decides whether THD is
+  // offered at all; this branch must agree with it or a selected backend becomes an error.
   if ((qkv_format == NVTE_QKV_Format::NVTE_BSHD) || (qkv_format == NVTE_QKV_Format::NVTE_SBHD) ||
-      (qkv_format == NVTE_QKV_Format::NVTE_BHSD)) {
+      (qkv_format == NVTE_QKV_Format::NVTE_BHSD) || (qkv_format == NVTE_QKV_Format::NVTE_THD)) {
     fused_attn::fused_attn_fp8_fwd_impl(
         batch, num_attn_heads, num_gqa_groups, max_seqlen_q, max_seqlen_kv, head_dim_qk, head_dim_v,
         is_training, attn_scale, p_dropout, qkv_layout, o_format, bias_type, mask_type,
@@ -1303,7 +1290,7 @@ void fused_attn_fp8_fwd(
         get_cudnn_fe_dtype(QKV_type), get_cudnn_fe_dtype(O_type), input_Q->scaling_mode,
         qkv_scale_inv_format, workspace->data.dptr, &workspace_size, stream, handle);
   } else {
-    NVTE_ERROR("FP8 fused attention only supports qkv_format=BSHD, SBHD, or BHSD.\n");
+    NVTE_ERROR("FP8 fused attention only supports qkv_format=BSHD, SBHD, BHSD, or THD.\n");
   }
 
   if (workspace_size > 0) {

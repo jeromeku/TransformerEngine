@@ -576,8 +576,6 @@ void nvte_fused_attn_fwd(const NVTETensor Q, const NVTETensor K, const NVTETenso
   Tensor *output_O = convertNVTETensorCheck(O);
   Tensor *wkspace = convertNVTETensor(workspace);
 
-  if (transformer_engine::getenv<bool>("NVTE_FP8_THD_TRACE", false))
-    fprintf(stderr, "[thd] nvte_fused_attn_fwd enter\n");
   NVTE_QKV_Format q_format = nvte_get_q_format(qkv_layout);
   NVTE_QKV_Format kv_format = nvte_get_kv_format(qkv_layout);
   auto *q_dims = input_Q->data.shape.data();
@@ -633,9 +631,6 @@ void nvte_fused_attn_fwd(const NVTETensor Q, const NVTETensor K, const NVTETenso
       h_q, h_kv, max_seqlen_q, max_seqlen_kv, d_qk, d_v, window_size_left, window_size_right,
       return_max_logit, cuda_graph, false);
 
-  if (transformer_engine::getenv<bool>("NVTE_FP8_THD_TRACE", false))
-    fprintf(stderr, "[thd] selector chose backend=%d  Q_type=%d  qkv_layout=%d\n",
-            (int)fused_attention_backend, (int)Q_type, (int)qkv_layout);
   if (fused_attention_backend == NVTE_Fused_Attn_Backend::NVTE_F16_arbitrary_seqlen) {
     fused_attn_arbitrary_seqlen_fwd(
         b, h_q, h_kv, max_seqlen_q, max_seqlen_kv, d_qk, d_v, t_q, t_kv, num_pages_k, num_pages_v,
@@ -646,8 +641,6 @@ void nvte_fused_attn_fwd(const NVTETensor Q, const NVTETensor K, const NVTETenso
         input_cu_seqlens_kv, input_cu_seqlens_q_padded, input_cu_seqlens_kv_padded,
         input_page_table_k, input_page_table_v, input_rng_state, wkspace, stream, handle);
   } else if (fused_attention_backend == NVTE_Fused_Attn_Backend::NVTE_FP8) {
-    if (transformer_engine::getenv<bool>("NVTE_FP8_THD_TRACE", false))
-      fprintf(stderr, "[thd] dispatcher: FP8 branch, b=%zu t_q=%zu t_kv=%zu\n", b, t_q, t_kv);
     fused_attn_fp8_fwd(b, h_q, h_kv, max_seqlen_q, max_seqlen_kv, d_qk, d_v, is_training,
                        attn_scale, dropout, qkv_layout, o_format, qkv_scale_inv_format, bias_type,
                        attn_mask_type, softmax_type, window_size_left, window_size_right,
