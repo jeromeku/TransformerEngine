@@ -593,6 +593,22 @@ void fused_attn_fp8_bwd_impl(
   bool is_O_in_F16 = (o_tensor_type == cudnn_frontend::DataType_t::HALF ||
                       o_tensor_type == cudnn_frontend::DataType_t::BFLOAT16);
 
+  // THD (packed varlen), mirroring fused_attn_fp8_fwd_impl. v1 is the gap-free case only:
+  // cu_seqlens doubles as cu_seqlens_padded, so element offsets come from the cu_seqlens this
+  // entry point already receives. Physical gaps are v1.1 (Phase G).
+  //
+  // The backward needs two *sets* of offsets, not one. Reads (Q/K/V/O/Stats) are addressed by
+  // qkv_layout; writes (dQ/dK/dV) by dqkv_layout. Those layouts can differ -- a t3hd forward can
+  // produce separate thd gradients -- and the multipliers differ with them (3*h*d vs h*d). When
+  // they happen to match, the second set is identical and costs one extra launch plus five small
+  // buffers, which is cheaper than being subtly wrong when they do not.
+  const bool is_ragged = (nvte_get_qkv_format(qkv_layout) == NVTE_QKV_Format::NVTE_THD);
+  NVTE_CHECK(!is_ragged || is_padding,
+             "FP8 fused attention with THD requires a padding or padding_causal mask!");
+  NVTE_CHECK(!is_ragged || nvte_get_qkv_format(dqkv_layout) == NVTE_QKV_Format::NVTE_THD,
+             "FP8 fused attention with THD requires THD gradients (dqkv_layout must be THD)!");
+  const DType ragged_offset_type = cudnn_runtime_version >= 90500 ? DType::kInt64 : DType::kInt32;
+
   try {
     FADescriptor_v1 descriptor{b,
                                h,
@@ -676,7 +692,16 @@ void fused_attn_fp8_bwd_impl(
                    std::shared_ptr<fe::graph::Tensor_attributes>,   // seq_q
                    std::shared_ptr<fe::graph::Tensor_attributes>,   // seq_kv
                    std::shared_ptr<fe::graph::Tensor_attributes>,   // dropout_seed
-                   std::shared_ptr<fe::graph::Tensor_attributes>>;  // dropout_offset
+                   std::shared_ptr<fe::graph::Tensor_attributes>,   // dropout_offset
+                   std::shared_ptr<fe::graph::Tensor_attributes>,   // offset_q
+                   std::shared_ptr<fe::graph::Tensor_attributes>,   // offset_k
+                   std::shared_ptr<fe::graph::Tensor_attributes>,   // offset_v
+                   std::shared_ptr<fe::graph::Tensor_attributes>,   // offset_o
+                   std::shared_ptr<fe::graph::Tensor_attributes>,   // offset_stats
+                   std::shared_ptr<fe::graph::Tensor_attributes>,   // offset_do
+                   std::shared_ptr<fe::graph::Tensor_attributes>,   // offset_dq
+                   std::shared_ptr<fe::graph::Tensor_attributes>,   // offset_dk
+                   std::shared_ptr<fe::graph::Tensor_attributes>>;  // offset_dv
 
     using CacheType = std::map<FADescriptor_v1, graph_and_tensors>;
     static thread_local CacheType sdpa_fp8_bprop_cache;
@@ -708,6 +733,11 @@ void fused_attn_fp8_bwd_impl(
       std::shared_ptr<fe::graph::Tensor_attributes> bias, dBias, softmax_offset, d_softmax_offset;
       std::shared_ptr<fe::graph::Tensor_attributes> seq_q, seq_kv;
       std::shared_ptr<fe::graph::Tensor_attributes> dropout_seed, dropout_offset;
+      // Reads, addressed by qkv_layout.
+      std::shared_ptr<fe::graph::Tensor_attributes> offset_q, offset_k, offset_v, offset_o,
+          offset_stats;
+      // Gradients, addressed by dqkv_layout.
+      std::shared_ptr<fe::graph::Tensor_attributes> offset_do, offset_dq, offset_dk, offset_dv;
 
       // Q, K, V, O, dO, stats, attn_scale
       std::vector<int64_t> q_strides(4), k_strides(4), v_strides(4), o_strides(4), dO_strides(4);
@@ -743,8 +773,38 @@ void fused_attn_fp8_bwd_impl(
       Stats = mha_graph->tensor(fe::graph::Tensor_attributes()
                                     .set_name("Stats")
                                     .set_dim({b, h, s_q, 1})
-                                    .set_stride({h * s_q, s_q, 1, 1})
+                                    // Packed Stats is [t, h, 1], so the sequence axis strides by
+                                    // h and the head axis by 1 -- the transpose of the dense case.
+                                    .set_stride(is_ragged ? std::vector<int64_t>{h * s_q, 1, h, 1}
+                                                          : std::vector<int64_t>{h * s_q, s_q, 1, 1})
                                     .set_data_type(fe::DataType_t::FLOAT));
+      // THD: dense {b,h,s,d} dims with BSHD-style strides, plus a per-batch ragged offset that
+      // displaces each sequence's base pointer into the packed buffer. The Stats multiplier is
+      // h, not h*d -- Stats holds one value per (token, head), not per element.
+      if (is_ragged) {
+        auto make_offset = [&](const char* name) {
+          return mha_graph->tensor(fe::graph::Tensor_attributes()
+                                       .set_name(name)
+                                       .set_dim({b + 1, 1, 1, 1})
+                                       .set_stride({1, 1, 1, 1})
+                                       .set_data_type(get_cudnn_fe_dtype(ragged_offset_type)));
+        };
+        offset_q = make_offset("offset_q");
+        offset_k = make_offset("offset_k");
+        offset_v = make_offset("offset_v");
+        offset_o = make_offset("offset_o");
+        offset_stats = make_offset("offset_stats");
+        offset_do = make_offset("offset_do");
+        offset_dq = make_offset("offset_dq");
+        offset_dk = make_offset("offset_dk");
+        offset_dv = make_offset("offset_dv");
+        Q->set_ragged_offset(offset_q);
+        K->set_ragged_offset(offset_k);
+        V->set_ragged_offset(offset_v);
+        O->set_ragged_offset(offset_o);
+        dO->set_ragged_offset(offset_do);
+        Stats->set_ragged_offset(offset_stats);
+      }
       attn_scale = mha_graph->tensor(fe::graph::Tensor_attributes()
                                          .set_name("attn_scale")
                                          .set_dim({1, 1, 1, 1})
@@ -1002,6 +1062,13 @@ void fused_attn_fp8_bwd_impl(
           .set_dim({b, hg, s_kv, d_v})
           .set_stride(dv_strides)
           .set_data_type(dqkv_tensor_type);
+      // Gradient writes use the dqkv_layout offset set, which is computed from dqkv_layout and so
+      // carries that layout's multipliers even when it differs from qkv_layout.
+      if (is_ragged) {
+        dQ->set_ragged_offset(offset_dq);
+        dK->set_ragged_offset(offset_dk);
+        dV->set_ragged_offset(offset_dv);
+      }
       amax_dQ->set_output(!is_mxfp8)
           .set_dim({1, 1, 1, 1})
           .set_stride({1, 1, 1, 1})
@@ -1062,6 +1129,11 @@ void fused_attn_fp8_bwd_impl(
           is_padding ? std::make_tuple(seq_q, seq_kv) : std::make_tuple(nullptr, nullptr);
       auto dropout_tuple = is_dropout ? std::make_tuple(dropout_seed, dropout_offset)
                                       : std::make_tuple(nullptr, nullptr);
+      auto ragged_tuple =
+          is_ragged ? std::make_tuple(offset_q, offset_k, offset_v, offset_o, offset_stats,
+                                      offset_do, offset_dq, offset_dk, offset_dv)
+                    : std::make_tuple(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+                                      nullptr, nullptr);
 
       NVTE_CHECK_CUDNN_FE(mha_graph->validate());
       NVTE_CHECK_CUDNN_FE(mha_graph->build_operation_graph(handle));
@@ -1069,9 +1141,9 @@ void fused_attn_fp8_bwd_impl(
       NVTE_CHECK_CUDNN_FE(mha_graph->check_support(handle));
       NVTE_CHECK_CUDNN_FE(mha_graph->build_plans(handle));
 
-      auto return_tuple =
-          std::tuple_cat(std::make_tuple(mha_graph), key_tensors_tuple, mxfp8_tensors_tuple,
-                         bias_tuple, softmax_offset_tuple, padding_tuple, dropout_tuple);
+      auto return_tuple = std::tuple_cat(std::make_tuple(mha_graph), key_tensors_tuple,
+                                         mxfp8_tensors_tuple, bias_tuple, softmax_offset_tuple,
+                                         padding_tuple, dropout_tuple, ragged_tuple);
       cache.insert({descriptor, return_tuple});
 
       return return_tuple;
@@ -1080,14 +1152,27 @@ void fused_attn_fp8_bwd_impl(
           descale_dO, descale_s, descale_dP, scale_s, scale_dQ, scale_dK, scale_dV, scale_dP, dQ,
           dK, dV, amax_dQ, amax_dK, amax_dV, amax_dP, Q_t, K_t, dO_f16, dO_t, descale_q_t,
           descale_k_t, descale_dO_t, bias, dBias, softmax_offset, d_softmax_offset, seq_q, seq_kv,
-          dropout_seed, dropout_offset] = get_graph(sdpa_fp8_bprop_cache, descriptor);
+          dropout_seed, dropout_offset, offset_q, offset_k, offset_v, offset_o, offset_stats,
+          offset_do, offset_dq, offset_dk, offset_dv] =
+        get_graph(sdpa_fp8_bprop_cache, descriptor);
 
     auto plan_workspace_size = mha_graph->get_workspace_size();
 
-    // Exit to request upper level API to allocate memory if needed
-    size_t actual_seqlen_workspace_size = 2 * b * sizeof(int32_t);
+    // Exit to request upper level API to allocate memory if needed.
+    // NB: the seqlen block must be aligned before the ragged offsets are appended -- they are
+    // int64 on cuDNN >= 9.5, and 2*b*sizeof(int32_t) is only 8-byte aligned for odd b. The fprop
+    // has always used alignTo<16> here; the backward did not, because nothing followed it.
+    size_t actual_seqlen_workspace_size =
+        is_ragged ? alignTo<16>(2 * b * sizeof(int32_t)) : 2 * b * sizeof(int32_t);
+    const size_t num_bytes_per_ragged_offset =
+        alignTo<16>(((b + 1) * typeToNumBits(ragged_offset_type)) / 8);
+    // Two sets of five: {Q,K,V,O,Stats} from qkv_layout and {dQ,dK,dV,dO,unused} from
+    // dqkv_layout. cu_seqlens_padded_to_offsets always writes five outputs, so the second call's
+    // Stats slot is allocated but unused -- simpler and safer than special-casing the kernel.
+    const size_t ragged_offsets_workspace_size = is_ragged ? 10 * num_bytes_per_ragged_offset : 0;
     if (workspace == nullptr) {
-      *workspace_size = plan_workspace_size + actual_seqlen_workspace_size;
+      *workspace_size =
+          plan_workspace_size + actual_seqlen_workspace_size + ragged_offsets_workspace_size;
       return;
     }
 
@@ -1161,6 +1246,57 @@ void fused_attn_fp8_bwd_impl(
       NVTE_CHECK_CUDA(cudaGetLastError());
       variant_pack[seq_q] = devActualSeqlenQ;
       variant_pack[seq_kv] = devActualSeqlenKV;
+
+      if (is_ragged) {
+        // Element offsets into the packed buffers: offsets_x[i] = mult_x * cu_seqlens[i]. The
+        // kernel derives the multipliers from layout_group/h/hg/d -- h*d for separate Q/K/V,
+        // 3*h*d for t3hd/th3d, 2*hg*d for the KV-packed layouts, and h (not h*d) for Stats.
+        int8_t* devOffsets = static_cast<int8_t*>(workspace) + plan_workspace_size +
+                             actual_seqlen_workspace_size;
+        auto slot = [&](size_t i) {
+          return static_cast<void*>(devOffsets + i * num_bytes_per_ragged_offset);
+        };
+        // Reads, from qkv_layout.
+        void* devOffsetsQ = slot(0);
+        void* devOffsetsK = slot(1);
+        void* devOffsetsV = slot(2);
+        void* devOffsetsO = slot(3);
+        void* devOffsetsS = slot(4);
+        // Gradients, from dqkv_layout. Slot 9 receives the second call's Stats output, which is
+        // not consumed -- dO reuses the O slot of that set.
+        void* devOffsetsdQ = slot(5);
+        void* devOffsetsdK = slot(6);
+        void* devOffsetsdV = slot(7);
+        void* devOffsetsdO = slot(8);
+        void* devOffsetsdS_unused = slot(9);
+
+        // v1: no physical gaps, so cu_seqlens doubles as cu_seqlens_padded.
+        cu_seqlens_padded_to_offsets<<<grid, nthreads_per_block, 0, stream>>>(
+            nvte_get_qkv_layout_group(qkv_layout), b, b, h, hg, d_qk, d_v,
+            static_cast<const int32_t*>(devPtrcuSeqlensQ),
+            static_cast<const int32_t*>(devPtrcuSeqlensKV), ragged_offset_type, devOffsetsQ,
+            devOffsetsK, devOffsetsV, devOffsetsO, devOffsetsS);
+        NVTE_CHECK_CUDA(cudaGetLastError());
+
+        // Second set, from dqkv_layout. Identical to the first when the layouts match; different
+        // multipliers when they do not, which is the case this exists for.
+        cu_seqlens_padded_to_offsets<<<grid, nthreads_per_block, 0, stream>>>(
+            nvte_get_qkv_layout_group(dqkv_layout), b, b, h, hg, d_qk, d_v,
+            static_cast<const int32_t*>(devPtrcuSeqlensQ),
+            static_cast<const int32_t*>(devPtrcuSeqlensKV), ragged_offset_type, devOffsetsdQ,
+            devOffsetsdK, devOffsetsdV, devOffsetsdO, devOffsetsdS_unused);
+        NVTE_CHECK_CUDA(cudaGetLastError());
+
+        variant_pack[offset_q] = devOffsetsQ;
+        variant_pack[offset_k] = devOffsetsK;
+        variant_pack[offset_v] = devOffsetsV;
+        variant_pack[offset_o] = devOffsetsO;
+        variant_pack[offset_stats] = devOffsetsS;
+        variant_pack[offset_dq] = devOffsetsdQ;
+        variant_pack[offset_dk] = devOffsetsdK;
+        variant_pack[offset_dv] = devOffsetsdV;
+        variant_pack[offset_do] = devOffsetsdO;
+      }
     }
 
     if (is_dropout) {
@@ -1399,8 +1535,11 @@ void fused_attn_fp8_bwd(
   size_t workspace_size = 0;
 
   NVTE_QKV_Format dqkv_format = nvte_get_qkv_format(dqkv_layout);
+  // THD admitted, mirroring the fprop guard at the top of fused_attn_fp8_fwd. As there, the
+  // capability query (nvte_get_fused_attn_backend) is the real gate; this branch only has to
+  // agree with it, or a backend the selector advertised turns into a hard error at execution.
   if ((dqkv_format == NVTE_QKV_Format::NVTE_BSHD) || (dqkv_format == NVTE_QKV_Format::NVTE_SBHD) ||
-      (dqkv_format == NVTE_QKV_Format::NVTE_BHSD)) {
+      (dqkv_format == NVTE_QKV_Format::NVTE_BHSD) || (dqkv_format == NVTE_QKV_Format::NVTE_THD)) {
     fused_attn::fused_attn_fp8_bwd_impl(
         batch, num_attn_heads, num_gqa_groups, max_seqlen_q, max_seqlen_kv, head_dim_qk, head_dim_v,
         attn_scale, p_dropout, qkv_layout, o_format, do_format, dqkv_layout, bias_type, mask_type,
@@ -1416,7 +1555,7 @@ void fused_attn_fp8_bwd(
         input_dO->scaling_mode, qkv_scale_inv_format, do_scale_inv_format, workspace->data.dptr,
         &workspace_size, stream, handle);
   } else {
-    NVTE_ERROR("FP8 fused attention only supports dqkv_format=BSHD, SBHD, or BHSD.\n");
+    NVTE_ERROR("FP8 fused attention only supports dqkv_format=BSHD, SBHD, BHSD, or THD.\n");
   }
 
   if (workspace_size > 0) {
