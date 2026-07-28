@@ -8,6 +8,8 @@
 #include "common.h"
 #include "pybind.h"
 
+#define THDT() (std::getenv("NVTE_FP8_THD_TRACE") && std::getenv("NVTE_FP8_THD_TRACE")[0]=='1')
+
 namespace {
 
 constexpr int block_size = 512;
@@ -243,6 +245,7 @@ std::vector<py::object> fused_attn_fwd(
   // create workspace
   TensorWrapper workspace;
 
+  if (THDT()) fprintf(stderr, "[thd] binding: before sizing call\n");
   // populate tensors with appropriate shapes and dtypes
   NVTE_SCOPED_GIL_RELEASE({
     nvte_fused_attn_fwd(
@@ -255,6 +258,7 @@ std::vector<py::object> fused_attn_fwd(
         window_size[1], bottom_right_diagonal, workspace.data(), at::cuda::getCurrentCUDAStream());
   });
 
+  if (THDT()) fprintf(stderr, "[thd] binding: sizing call returned\n");
   // allocate memory for workspace and auxiliary output tensors
   auto workspace_data = allocateSpace(workspace.shape(), workspace.dtype());
   workspace =
@@ -276,6 +280,12 @@ std::vector<py::object> fused_attn_fwd(
   size_t i = 0;
   at::Tensor output_tensor;
   // intermediate softmax stats tensor S
+  if (THDT()) {
+    auto sh = nvte_shape_to_vector(nvte_tensor_shape(nvte_aux_tensor_pack.tensors[i]));
+    fprintf(stderr, "[thd] binding: aux[0] S rank=%zu dims=", sh.size());
+    for (auto d : sh) fprintf(stderr, "%zu,", d);
+    fprintf(stderr, "\n");
+  }
   output_tensor =
       allocateSpace(nvte_shape_to_vector(nvte_tensor_shape(nvte_aux_tensor_pack.tensors[i])),
                     static_cast<DType>(nvte_tensor_type(nvte_aux_tensor_pack.tensors[i])), false);
@@ -300,6 +310,7 @@ std::vector<py::object> fused_attn_fwd(
     set_tensor_param(i++, SoftmaxOffset.value());
   }
 
+  if (THDT()) fprintf(stderr, "[thd] binding: aux allocated, before execute call\n");
   // execute the kernel
   NVTE_SCOPED_GIL_RELEASE({
     nvte_fused_attn_fwd(
