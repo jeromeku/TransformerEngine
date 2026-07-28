@@ -130,6 +130,16 @@ NVTE_Fused_Attn_Backend get_fused_attn_backend(
   return fused_attention_backend;
 }
 
+int64_t get_ragged_offset_dtype_bits(NVTE_QKV_Layout qkv_layout, int64_t num_attn_heads,
+                                     int64_t num_gqa_groups, int64_t tokens_q, int64_t tokens_kv,
+                                     int64_t head_dim_qk, int64_t head_dim_v) {
+  // Via the nvte_* C API: the common library's version script exports only nvte_* (plus a short
+  // explicit list), so the underlying C++ helper is a local symbol and cannot be called directly
+  // from this extension.
+  return nvte_get_ragged_offset_dtype_bits(qkv_layout, num_attn_heads, num_gqa_groups, tokens_q,
+                                           tokens_kv, head_dim_qk, head_dim_v);
+}
+
 // helper function for S and dP quantizers
 std::tuple<TensorWrapper, py::object, std::optional<at::Tensor>> quantizer_helper(
     py::handle quantizer, const std::vector<size_t> &shape, DType dtype, bool create_hp_tensor,

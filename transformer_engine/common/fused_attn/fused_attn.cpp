@@ -245,6 +245,17 @@ NVTE_Fused_Attn_Backend nvte_get_fused_attn_backend(
 
   // For ragged offsets we only support 32-bit prior to cuDNN 9.5
   // Only used when THD format is requested.
+  //
+  // This query is a public C API that receives max_seqlen but neither the physical token count t
+  // nor the batch size, so it *cannot* compute the true offset bound (which scales with t, not
+  // max_seqlen -- see get_ragged_offset_dtype). Passing max_seqlen here therefore yields a LOWER
+  // BOUND: an int64 answer is conclusive and correctly rejects, but an int32 answer does not
+  // prove safety. The exact check, using t, is enforced at the execution entry points
+  // (nvte_fused_attn_fwd/bwd), which do have it -- so an underestimate here becomes a clear
+  // error there rather than silent int32 wraparound.
+  //
+  // Making this exact would mean adding t_q/t_kv to the public signature. Deliberately not done
+  // unilaterally; see tests/phaseD_offset_dtype/WORKLOG.md.
   const bool requires_64bit_ragged_offset =
       (qkv_format == NVTE_THD && fused_attn::get_ragged_offset_dtype(
                                      layout_group, num_attn_heads, num_gqa_groups, max_seqlen_q,
@@ -543,6 +554,52 @@ NVTE_Fused_Attn_Backend nvte_get_fused_attn_backend(
   return backend;
 }
 
+int64_t nvte_get_ragged_offset_dtype_bits(NVTE_QKV_Layout qkv_layout, int64_t num_attn_heads,
+                                          int64_t num_gqa_groups, int64_t tokens_q,
+                                          int64_t tokens_kv, int64_t head_dim_qk,
+                                          int64_t head_dim_v) {
+  NVTE_API_CALL(nvte_get_ragged_offset_dtype_bits);
+  using namespace transformer_engine;
+  const DType dtype = fused_attn::get_ragged_offset_dtype(
+      nvte_get_qkv_layout_group(qkv_layout), num_attn_heads, num_gqa_groups, tokens_q, tokens_kv,
+      head_dim_qk, head_dim_v);
+  return dtype == DType::kInt64 ? 64 : 32;
+}
+
+namespace {
+
+// The exact ragged-offset width check, at the only layer that can perform it.
+//
+// nvte_get_fused_attn_backend sizes the offsets from max_seqlen because its public signature has
+// nothing better; that is a lower bound and can answer "int32 is enough" for a packed batch whose
+// offsets actually need int64 (it underestimates by roughly the batch size). Here t_q/t_kv are
+// known, so the bound is exact.
+//
+// Only load-bearing on cuDNN < 9.5: from 9.5 the kernels allocate int64 offsets unconditionally
+// (fused_attn_f16_arbitrary_seqlen.cu, fused_attn_fp8.cu), so an underestimate upstream is inert.
+// Below 9.5 they use int32, and an overflow silently wraps into a wrong base pointer -- a read
+// from the middle of some other sequence, producing plausible numbers and no error at all.
+void check_ragged_offset_width(NVTE_QKV_Layout qkv_layout, size_t h_q, size_t h_kv, size_t d_qk,
+                               size_t d_v, size_t t_q, size_t t_kv, size_t cudnn_runtime_version,
+                               const char *where) {
+  if (nvte_get_qkv_format(qkv_layout) != NVTE_QKV_Format::NVTE_THD) return;
+  if (cudnn_runtime_version >= 90500) return;
+
+  const transformer_engine::DType needed = transformer_engine::fused_attn::get_ragged_offset_dtype(
+      nvte_get_qkv_layout_group(qkv_layout), static_cast<int64_t>(h_q),
+      static_cast<int64_t>(h_kv), static_cast<int64_t>(t_q), static_cast<int64_t>(t_kv),
+      static_cast<int64_t>(d_qk), static_cast<int64_t>(d_v));
+
+  NVTE_CHECK(needed != transformer_engine::DType::kInt64,
+             where, ": this packed (THD) batch needs 64-bit ragged offsets, but cuDNN ",
+             cudnn_runtime_version, " (< 9.5.0) supports only 32-bit. Offsets scale with the "
+             "total packed token count (t_q=", t_q, ", t_kv=", t_kv, ", h_q=", h_q, ", d_qk=",
+             d_qk, "), not with max_seqlen. Upgrade to cuDNN >= 9.5.0, or reduce the packed "
+             "batch so that h*d*t stays within INT32_MAX.");
+}
+
+}  // namespace
+
 // NVTE fused attention FWD with separate Q, K and V
 void nvte_fused_attn_fwd(const NVTETensor Q, const NVTETensor K, const NVTETensor V,
                          const NVTETensor Bias, const NVTETensor SoftmaxOffset, NVTETensor S,
@@ -593,6 +650,8 @@ void nvte_fused_attn_fwd(const NVTETensor Q, const NVTETensor K, const NVTETenso
   } else if (kv_format == NVTE_QKV_Format::NVTE_THD) {
     b = input_cu_seqlens_kv->data.shape[0] - 1;
   }
+  check_ragged_offset_width(qkv_layout, h_q, h_kv, d_qk, d_v, t_q, t_kv, cudnnGetVersion(),
+                            "nvte_fused_attn_fwd");
 
   int64_t num_pages_k = 0;
   int64_t num_pages_v = 0;
@@ -702,6 +761,8 @@ void nvte_fused_attn_bwd(const NVTETensor Q, const NVTETensor K, const NVTETenso
   } else if (kv_format == NVTE_QKV_Format::NVTE_THD) {
     b = input_cu_seqlens_kv->data.shape[0] - 1;
   }
+  check_ragged_offset_width(qkv_layout, h_q, h_kv, d_qk, d_v, t_q, t_kv, cudnnGetVersion(),
+                            "nvte_fused_attn_bwd");
 
   auto handle = cudnnExecutionPlanManager::Instance().GetHandle();
   const NVTEDType Q_type = static_cast<NVTEDType>(input_Q->data.dtype);

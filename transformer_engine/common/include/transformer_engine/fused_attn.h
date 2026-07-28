@@ -223,6 +223,32 @@ NVTE_Fused_Attn_Backend nvte_get_fused_attn_backend(
     size_t max_seqlen_kv, size_t head_dim_qk, size_t head_dim_v, int64_t window_size_left,
     int64_t window_size_right, bool return_max_logit, bool cuda_graph, bool deterministic);
 
+/*! \brief Bit width (32 or 64) required for THD ragged offsets.
+ *
+ *  Ragged offsets are `multiplier * cu_seqlens_padded[i]`, so the largest one scales with the
+ *  **total packed token count** `t = sum(seqlens)`, not with `max_seqlen`. Sizing from
+ *  `max_seqlen` underestimates by roughly the batch size, which matters because cuDNN below
+ *  9.5.0 supports only 32-bit ragged offsets: an underestimate there wraps the offset and
+ *  silently addresses the wrong sequence.
+ *
+ *  Note that `nvte_get_fused_attn_backend` cannot perform this check exactly -- it receives
+ *  `max_seqlen` and not `t` -- so a caller that packs sequences should use this directly with
+ *  physical extents to decide whether a batch is representable.
+ *
+ *  \param[in] qkv_layout      Layout of Q, K and V; determines the per-tensor multipliers.
+ *  \param[in] num_attn_heads  Number of query heads.
+ *  \param[in] num_gqa_groups  Number of key/value heads.
+ *  \param[in] tokens_q        Physical token count of Q (`t_q`, i.e. `cu_seqlens_q_padded[-1]`).
+ *  \param[in] tokens_kv       Physical token count of K/V (`t_kv`).
+ *  \param[in] head_dim_qk     Head dimension of Q and K.
+ *  \param[in] head_dim_v      Head dimension of V.
+ *  \return 32 or 64.
+ */
+int64_t nvte_get_ragged_offset_dtype_bits(NVTE_QKV_Layout qkv_layout, int64_t num_attn_heads,
+                                          int64_t num_gqa_groups, int64_t tokens_q,
+                                          int64_t tokens_kv, int64_t head_dim_qk,
+                                          int64_t head_dim_v);
+
 /*! \brief Compute dot product attention with separate Q, K and V.
  *
  * Computes:
