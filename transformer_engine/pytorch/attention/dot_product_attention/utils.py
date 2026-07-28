@@ -893,6 +893,18 @@ def get_attention_backend(
             if use_unfused_attention:
                 logger.debug("Disabling UnfusedDotProductAttention for pad_between_seqs = True")
             use_unfused_attention = False
+            # FP8 + THD builds its ragged offsets from cu_seqlens alone -- the FP8 kernels are not
+            # threaded with cu_seqlens_*_padded, so a physical gap between sequences would be
+            # addressed as if it were not there and silently read a neighbour's tokens. This has
+            # to be rejected here rather than in nvte_get_fused_attn_backend, which is never told
+            # about pad_between_seqs. Supporting gaps is v1.1; see 06-implementation-plan.md.
+            if fp8 and fp8_meta["recipe"].fp8_dpa:
+                if use_fused_attention:
+                    logger.debug(
+                        "Disabling FusedAttention for FP8 with qkv_format = thd and padding "
+                        "between sequences; FP8 ragged offsets are derived from cu_seqlens only"
+                    )
+                use_fused_attention = False
         if device_compute_capability == (12, 0):
             if cudnn_version < (9, 18, 1):
                 if use_fused_attention:

@@ -263,15 +263,6 @@ NVTE_Fused_Attn_Backend nvte_get_fused_attn_backend(
   const bool supported_ragged_offset_size =
       (!requires_64bit_ragged_offset || cudnn_runtime_version >= 90500);
 
-  // FP8 + THD (packed varlen) is under development. The ragged-offset plumbing in
-  // fused_attn_fp8.cu is incomplete, so this must stay CLOSED by default: a capability query is
-  // an execution contract and must never advertise a path whose expected result is a fault.
-  // NVTE_FP8_THD_EXPERIMENTAL=1 opens it for the development test suite only. Delete this gate --
-  // do not merely flip its default -- once forward and backward both pass.
-  // See claude/flashattn_varlen_fp8/06-implementation-plan.md, Phase B/C/E.
-  static const bool fp8_thd_experimental =
-      transformer_engine::getenv<bool>("NVTE_FP8_THD_EXPERIMENTAL", false);
-
   if ((q_dtype == NVTEDType::kNVTEFloat8E4M3 || q_dtype == NVTEDType::kNVTEFloat8E5M2) &&
       sm_arch_ >= 90 && bias_type == NVTE_Bias_Type::NVTE_NO_BIAS &&
       (
@@ -307,11 +298,23 @@ NVTE_Fused_Attn_Backend nvte_get_fused_attn_backend(
        (cudnn_runtime_version >= 92100 &&
         (qkv_format == NVTE_QKV_Format::NVTE_BSHD || qkv_format == NVTE_QKV_Format::NVTE_SBHD ||
          qkv_format == NVTE_QKV_Format::NVTE_BHSD ||
-         // EXPERIMENTAL: THD, mirroring the F16 branch's 9.1 rule. Ragged offsets require a
-         // padding-family mask (cuDNN frontend sdpa_support_surface.h), and FP8 ragged *backward*
-         // is Blackwell-only (sdpa_fp8_bwd.h), hence the is_training/sm_arch condition.
-         (fp8_thd_experimental && qkv_format == NVTE_QKV_Format::NVTE_THD && sm_arch_ >= 90 &&
-          (!is_training || sm_arch_ >= 100) &&
+         // THD (packed varlen). Each constraint with its source:
+         //   * Padding-family mask only. cuDNN requires one alongside ragged offsets
+         //     (cudnn_frontend sdpa_support_surface.h: "Ragged offsets are only supported with
+         //     padding mask"). Admitting a non-padding mask would hand cuDNN a graph it rejects
+         //     at build time -- a loud failure, but at the wrong layer and with a worse message
+         //     than a clean capability answer.
+         //   * Blackwell only, and not SM120. FP8 ragged *backward* is excluded on Hopper
+         //     (sdpa_fp8_bwd.h) and SM120 is excluded from the FP8 ragged surface
+         //     (sdpa_support_surface.h). v1 requires SM100 for both directions rather than
+         //     admitting SM90 for inference alone: an answer that flips with is_training is a
+         //     sharp edge for a caller that queries once and then trains.
+         //   * >= 9.21 is inherited from the enclosing branch -- comfortably above the 9.5 floor
+         //     at which cuDNN switched ragged offsets to int64, so the offset-width question
+         //     Phase D deals with cannot arise on this path.
+         // Physical inter-sequence gaps (cu_seqlens_padded != cu_seqlens) are excluded in the
+         // Python layer, which is where pad_between_seqs is known; this query never sees it.
+         (qkv_format == NVTE_QKV_Format::NVTE_THD && sm_arch_ >= 100 && sm_arch_ != 120 &&
           (attn_mask_type == NVTE_Mask_Type::NVTE_PADDING_MASK ||
            attn_mask_type == NVTE_Mask_Type::NVTE_PADDING_CAUSAL_MASK))))) &&
       // The F16 branch uses the version-aware form; the FP8 branch rejected int64 offsets
