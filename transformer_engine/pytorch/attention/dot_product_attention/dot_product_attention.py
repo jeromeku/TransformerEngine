@@ -176,6 +176,50 @@ _dpa_fp8ds_amax_algo = os.getenv("NVTE_DPA_FP8DS_AMAX_ALGO", "most_recent")
 _dpa_fp8ds_amax_histlen = int(os.getenv("NVTE_DPA_FP8DS_AMAX_HISTLEN", "1"))
 _dpa_fp8ds_reduce_amax = os.getenv("NVTE_DPA_FP8DS_REDUCE_AMAX", "1") == "1"
 
+# Opt-in content validation for packed (THD) sequence metadata: NVTE_THD_VALIDATE_METADATA=1.
+#
+# The unconditional checks in the THD branch below cover rank, dtype and shape -- all host-side
+# and free. Nothing checks the *values*, and cu_seqlens is handed to the kernels as a trusted
+# device pointer from which every ragged offset is derived. Measured behaviour without this:
+#
+#   non-monotonic offsets  -> runs to completion, returns finite garbage
+#   negative offsets       -> runs to completion, returns finite garbage
+#   b entries instead of b+1 -> runs to completion, silently drops a sequence
+#   first offset != 0      -> returns NaN, no diagnostic
+#   final offset > t       -> opaque CUDA fault, attributed to an unrelated launch
+#
+# These checks read the offsets back from the device, so they cost a sync per call and cannot be
+# on by default in a training hot path. Enable them in tests and when debugging a packed batch.
+_thd_validate_metadata = os.getenv("NVTE_THD_VALIDATE_METADATA", "0") == "1"
+
+
+def _check_cu_seqlens(cu_seqlens: torch.Tensor, total_tokens: int, name: str) -> None:
+    """Validate the *contents* of a cumulative sequence-length tensor.
+
+    Raises ValueError with the offending values rather than letting a bad offset reach the
+    kernel, where it either corrupts a neighbouring sequence silently or faults opaquely.
+    """
+    host = cu_seqlens.detach().to("cpu", torch.int64)
+    if host.numel() < 2:
+        raise ValueError(f"{name} must have at least 2 entries (batch_size + 1), got {host.numel()}")
+    if host[0].item() != 0:
+        raise ValueError(
+            f"{name}[0] must be 0, got {host[0].item()}. A nonzero first offset shifts every"
+            " sequence base pointer and yields NaN rather than an error."
+        )
+    diffs = host[1:] - host[:-1]
+    if bool((diffs < 0).any()):
+        bad = int((diffs < 0).nonzero()[0].item())
+        raise ValueError(
+            f"{name} must be non-decreasing, but entry {bad + 1} ({host[bad + 1].item()}) is less"
+            f" than entry {bad} ({host[bad].item()}). Full tensor: {host.tolist()}"
+        )
+    if host[-1].item() > total_tokens:
+        raise ValueError(
+            f"{name}[-1] is {host[-1].item()}, which exceeds the {total_tokens} tokens actually"
+            " present in the packed tensor. The kernel would read past the end of the buffer."
+        )
+
 
 __all__ = ["DotProductAttention"]
 
@@ -1335,6 +1379,19 @@ class DotProductAttention(TransformerEngineBaseModule):
                     cu_seqlens_q.dtype == torch.int32 and cu_seqlens_kv.dtype == torch.int32
                 ), "cu_seqlens_q and cu_seqlens_q must both be in dtype torch.int32!"
                 batch_size = len(cu_seqlens_q) - 1
+                if _thd_validate_metadata:
+                    _check_cu_seqlens(cu_seqlens_q, query_layer.shape[0], "cu_seqlens_q")
+                    _check_cu_seqlens(cu_seqlens_kv, key_layer.shape[0], "cu_seqlens_kv")
+                    # The padded variants describe the *physical* extents, so their final entry is
+                    # the buffer length rather than the token count; same bound, still <= t.
+                    if cu_seqlens_q_padded is not None:
+                        _check_cu_seqlens(
+                            cu_seqlens_q_padded, query_layer.shape[0], "cu_seqlens_q_padded"
+                        )
+                    if cu_seqlens_kv_padded is not None:
+                        _check_cu_seqlens(
+                            cu_seqlens_kv_padded, key_layer.shape[0], "cu_seqlens_kv_padded"
+                        )
                 if max_seqlen_q is None:
                     if cu_seqlens_q_padded is not None:
                         seqlens_q = cu_seqlens_q_padded[1:] - cu_seqlens_q_padded[:-1]
