@@ -6,6 +6,7 @@
 
 #include "../extensions.h"
 #include "common.h"
+#include "common/util/system.h"  // transformer_engine::getenv, for the workspace canary
 #include "pybind.h"
 
 namespace {
@@ -41,6 +42,73 @@ void mha_fill(const transformer_engine::TensorWrapper &self, const at::Tensor &s
 
   NVTE_SCOPED_GIL_RELEASE(
       { nvte_memset(base_ptr, 0, total_bytes, at::cuda::getCurrentCUDAStream()); });
+}
+
+// ---------------------------------------------------------------------------------------
+// Workspace canary -- enable with NVTE_FP8_THD_WORKSPACE_CANARY=1
+//
+// Both fused-attention entry points use a two-call protocol: query the required workspace with a
+// null pointer, allocate exactly that many bytes, then run. Nothing checks that the kernel stays
+// inside the size it asked for. The FP8 THD work grows that size -- five ragged-offset buffers in
+// the forward, more in the backward -- and an under-count writes past the end of the allocation
+// into whatever the caching allocator handed out next.
+//
+// That failure is silent, and specifically invisible to compute-sanitizer: the bytes just past
+// the workspace are legally mapped pool memory, so the overrun is a valid write to a tool that
+// only knows about allocation boundaries it can see. A guard band is the only way to catch it.
+//
+// Off by default -- it costs a fill, a device-to-host copy and a sync on every attention call.
+constexpr size_t kCanaryPad = 256;  // a multiple of the 256B alignment at::empty already gives us
+constexpr uint8_t kCanaryByte = 0xA5;
+
+bool workspace_canary_enabled() {
+  static const bool enabled =
+      transformer_engine::getenv<bool>("NVTE_FP8_THD_WORKSPACE_CANARY", false);
+  return enabled;
+}
+
+size_t workspace_nbytes(const transformer_engine::TensorWrapper &ws) {
+  std::vector<size_t> shape = transformer_engine::pytorch::convertShape(ws.shape());
+  size_t elems = 1;
+  for (size_t d : shape) {
+    elems *= d;
+  }
+  return (elems * transformer_engine::pytorch::typeToNumBits(ws.dtype())) / 8;
+}
+
+// Over-allocates by kCanaryPad on each side and reports the interior pointer through `interior`.
+// The returned tensor owns the storage and must outlive the kernel launch.
+at::Tensor allocate_guarded_workspace(size_t nbytes, void **interior) {
+  auto buf = at::empty({static_cast<int64_t>(nbytes + 2 * kCanaryPad)}, at::CUDA(at::kByte));
+  buf.fill_(kCanaryByte);
+  *interior = static_cast<void *>(static_cast<uint8_t *>(buf.data_ptr()) + kCanaryPad);
+  return buf;
+}
+
+void check_guarded_workspace(const at::Tensor &buf, size_t nbytes, const char *where) {
+  // Negative control: a guard band that has never been seen to fire proves nothing, and a test
+  // asserting "no exception" would pass just as happily if the canary were dead code. With
+  // NVTE_FP8_THD_WORKSPACE_CANARY_SELFTEST=1 we corrupt one byte of the trailing guard
+  // ourselves, so the suite can assert the detector actually reports it.
+  static const bool selftest =
+      transformer_engine::getenv<bool>("NVTE_FP8_THD_WORKSPACE_CANARY_SELFTEST", false);
+  if (selftest) {
+    uint8_t poison = static_cast<uint8_t>(~kCanaryByte);
+    NVTE_CHECK_CUDA(cudaMemcpy(static_cast<uint8_t *>(buf.data_ptr()) + kCanaryPad + nbytes,
+                               &poison, 1, cudaMemcpyHostToDevice));
+  }
+
+  at::Tensor host = buf.to(at::kCPU);
+  const uint8_t *p = host.data_ptr<uint8_t>();
+  auto scan = [&](size_t base, const char *side) {
+    for (size_t i = 0; i < kCanaryPad; i++) {
+      NVTE_CHECK(p[base + i] == kCanaryByte, "workspace canary corrupted (", where, ", ", side,
+                 " guard, byte ", i, " of ", kCanaryPad, "): the kernel wrote outside the ", nbytes,
+                 " bytes its capability query asked for");
+    }
+  };
+  scan(0, "leading");
+  scan(kCanaryPad + nbytes, "trailing");
 }
 
 }  // namespace
@@ -274,9 +342,18 @@ std::vector<py::object> fused_attn_fwd(
   });
 
   // allocate memory for workspace and auxiliary output tensors
-  auto workspace_data = allocateSpace(workspace.shape(), workspace.dtype());
-  workspace = makeTransformerEngineTensor(workspace_data.data_ptr(), workspace.shape(),
-                                          workspace.dtype());
+  at::Tensor workspace_data;
+  const bool canary = workspace_canary_enabled();
+  const size_t canary_bytes = canary ? workspace_nbytes(workspace) : 0;
+  if (canary) {
+    void *interior = nullptr;
+    workspace_data = allocate_guarded_workspace(canary_bytes, &interior);
+    workspace = makeTransformerEngineTensor(interior, workspace.shape(), workspace.dtype());
+  } else {
+    workspace_data = allocateSpace(workspace.shape(), workspace.dtype());
+    workspace = makeTransformerEngineTensor(workspace_data.data_ptr(), workspace.shape(),
+                                            workspace.dtype());
+  }
 
   // output_tensors = [O, nvte_aux_tensor_pack.tensors]
   std::vector<py::object> output_tensors;
@@ -330,6 +407,9 @@ std::vector<py::object> fused_attn_fwd(
         window_size[1], bottom_right_diagonal, workspace.data(), at::cuda::getCurrentCUDAStream());
   });
 
+  if (canary) {
+    check_guarded_workspace(workspace_data, canary_bytes, "fused_attn_fwd");
+  }
 
   // destroy tensor wrappers, but not allocated memory
   nvte_tensor_pack_destroy(&nvte_aux_tensor_pack);
@@ -604,9 +684,18 @@ std::vector<py::object> fused_attn_bwd(
   });
 
   // allocate memory for workspace
-  auto workspace_data = allocateSpace(workspace.shape(), workspace.dtype());
-  workspace = makeTransformerEngineTensor(workspace_data.data_ptr(), workspace.shape(),
-                                          workspace.dtype());
+  at::Tensor workspace_data;
+  const bool canary = workspace_canary_enabled();
+  const size_t canary_bytes = canary ? workspace_nbytes(workspace) : 0;
+  if (canary) {
+    void *interior = nullptr;
+    workspace_data = allocate_guarded_workspace(canary_bytes, &interior);
+    workspace = makeTransformerEngineTensor(interior, workspace.shape(), workspace.dtype());
+  } else {
+    workspace_data = allocateSpace(workspace.shape(), workspace.dtype());
+    workspace = makeTransformerEngineTensor(workspace_data.data_ptr(), workspace.shape(),
+                                            workspace.dtype());
+  }
 
   // execute kernel
   NVTE_SCOPED_GIL_RELEASE({
@@ -621,6 +710,9 @@ std::vector<py::object> fused_attn_bwd(
         at::cuda::getCurrentCUDAStream());
   });
 
+  if (canary) {
+    check_guarded_workspace(workspace_data, canary_bytes, "fused_attn_bwd");
+  }
 
   // destroy tensor wrappers
   nvte_tensor_pack_destroy(&nvte_aux_tensor_pack);
