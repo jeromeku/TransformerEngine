@@ -17,15 +17,23 @@ void mha_fill(const transformer_engine::TensorWrapper &self, const at::Tensor &s
   std::vector<size_t> shape = transformer_engine::pytorch::convertShape(self.shape());
 
   auto max_tokens = shape[0];
-  auto fcd_size = 1;
-  for (size_t i = 1; i <= shape.size(); i++) {
+  // NB: the bound was `i <= shape.size()`, which read one element past the end of the vector
+  // and multiplied the garbage into fcd_size (observed: rank-3 [640,4,128] gave 164352 instead
+  // of 512, having picked up shape[3]=321). size_t rather than int, so the product cannot
+  // overflow on large packed batches.
+  size_t fcd_size = 1;
+  for (size_t i = 1; i < shape.size(); i++) {
     fcd_size *= shape[i];
   }
 
   NVTE_CHECK(fcd_size % block_size == 0, "input size not aligned to block size");
 
   size_t element_size_bits = transformer_engine::pytorch::typeToNumBits(self.dtype());
-  int32_t start_row = start_index.data_ptr<int32_t>()[0];
+  // start_index is a slice of cu_seqlens, which lives on the device. data_ptr()[0] dereferenced
+  // it from host code, which segfaults. item<>() performs the device-to-host copy. It syncs, but
+  // this path already issues a memset and the alternative branch at the call sites is a
+  // full fill_(0), so the cost is in line with the surrounding code.
+  const int32_t start_row = start_index.item<int32_t>();
   void *base_ptr = static_cast<char *>(self.get_rowwise_data().data_ptr) +
                    static_cast<size_t>(start_row) * fcd_size * element_size_bits / 8;
   size_t num_rows_to_zero = max_tokens - start_row;
@@ -52,6 +60,16 @@ NVTE_Fused_Attn_Backend get_fused_attn_backend(
       max_seqlen_q, max_seqlen_kv, head_dim_qk, head_dim_v, window_size_left, window_size_right,
       return_max_logit, cuda_graph, deterministic);
   return fused_attention_backend;
+}
+
+int64_t get_ragged_offset_dtype_bits(NVTE_QKV_Layout qkv_layout, int64_t num_attn_heads,
+                                     int64_t num_gqa_groups, int64_t tokens_q, int64_t tokens_kv,
+                                     int64_t head_dim_qk, int64_t head_dim_v) {
+  // Via the nvte_* C API: the common library's version script exports only nvte_* (plus a short
+  // explicit list), so the underlying C++ helper is a local symbol and cannot be called directly
+  // from this extension.
+  return nvte_get_ragged_offset_dtype_bits(qkv_layout, num_attn_heads, num_gqa_groups, tokens_q,
+                                           tokens_kv, head_dim_qk, head_dim_v);
 }
 
 // helper function for S and dP quantizers
@@ -257,8 +275,8 @@ std::vector<py::object> fused_attn_fwd(
 
   // allocate memory for workspace and auxiliary output tensors
   auto workspace_data = allocateSpace(workspace.shape(), workspace.dtype());
-  workspace =
-      makeTransformerEngineTensor(workspace_data.data_ptr(), workspace.shape(), workspace.dtype());
+  workspace = makeTransformerEngineTensor(workspace_data.data_ptr(), workspace.shape(),
+                                          workspace.dtype());
 
   // output_tensors = [O, nvte_aux_tensor_pack.tensors]
   std::vector<py::object> output_tensors;
@@ -311,6 +329,7 @@ std::vector<py::object> fused_attn_fwd(
         qkv_scale_inv_format, bias_type, attn_mask_type, softmax_type, window_size[0],
         window_size[1], bottom_right_diagonal, workspace.data(), at::cuda::getCurrentCUDAStream());
   });
+
 
   // destroy tensor wrappers, but not allocated memory
   nvte_tensor_pack_destroy(&nvte_aux_tensor_pack);
@@ -586,8 +605,8 @@ std::vector<py::object> fused_attn_bwd(
 
   // allocate memory for workspace
   auto workspace_data = allocateSpace(workspace.shape(), workspace.dtype());
-  workspace =
-      makeTransformerEngineTensor(workspace_data.data_ptr(), workspace.shape(), workspace.dtype());
+  workspace = makeTransformerEngineTensor(workspace_data.data_ptr(), workspace.shape(),
+                                          workspace.dtype());
 
   // execute kernel
   NVTE_SCOPED_GIL_RELEASE({
@@ -601,6 +620,7 @@ std::vector<py::object> fused_attn_bwd(
         window_size[1], bottom_right_diagonal, deterministic, cuda_graph, workspace.data(),
         at::cuda::getCurrentCUDAStream());
   });
+
 
   // destroy tensor wrappers
   nvte_tensor_pack_destroy(&nvte_aux_tensor_pack);

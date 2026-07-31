@@ -500,34 +500,54 @@ __global__ void cu_seqlens_padded_to_offsets(NVTE_QKV_Layout_Group layout_group,
   }
 }
 
+namespace {
+
+// Multiply in a width that cannot wrap, and saturate rather than overflow. The inputs here are
+// products of head count, head dim and token count; a pathological config could otherwise wrap
+// int64 and produce a *small* max_offset, which would answer "int32 is fine" for the very case
+// the check exists to reject.
+int64_t checked_mul(int64_t a, int64_t b) {
+  constexpr int64_t kMax = std::numeric_limits<int64_t>::max();
+  if (a == 0 || b == 0) return 0;
+  if (a > kMax / b) return kMax;
+  return a * b;
+}
+
+int64_t checked_mul(int64_t a, int64_t b, int64_t c) { return checked_mul(checked_mul(a, b), c); }
+
+}  // namespace
+
 DType get_ragged_offset_dtype(NVTE_QKV_Layout_Group layout_group, int64_t num_attn_heads,
-                              int64_t num_gqa_groups, int64_t max_seqlen_q, int64_t max_seqlen_kv,
+                              int64_t num_gqa_groups, int64_t tokens_q, int64_t tokens_kv,
                               int64_t head_dim_qk, int64_t head_dim_v) {
+  // NB: `tokens_q`/`tokens_kv` are physical token counts (t = sum of seqlens), not max_seqlen.
+  // The offsets are mult * cu_seqlens_padded[i], whose maximum is mult * t. Sizing from
+  // max_seqlen underestimates by roughly the batch size -- see the header for the contract.
   std::array<int64_t, 4> offsets_qkvo{};
   switch (layout_group) {
     case NVTE_QKV_Layout_Group::NVTE_HD_HD_HD:
     case NVTE_QKV_Layout_Group::NVTE_Paged_KV_HD_HD_HD:
-      offsets_qkvo[0] = num_attn_heads * head_dim_qk * max_seqlen_q;
-      offsets_qkvo[1] = num_gqa_groups * head_dim_qk * max_seqlen_kv;
-      offsets_qkvo[2] = num_gqa_groups * head_dim_v * max_seqlen_kv;
+      offsets_qkvo[0] = checked_mul(num_attn_heads, head_dim_qk, tokens_q);
+      offsets_qkvo[1] = checked_mul(num_gqa_groups, head_dim_qk, tokens_kv);
+      offsets_qkvo[2] = checked_mul(num_gqa_groups, head_dim_v, tokens_kv);
       break;
     case NVTE_QKV_Layout_Group::NVTE_3HD:
     case NVTE_QKV_Layout_Group::NVTE_H3D:
-      offsets_qkvo[0] = 3 * num_attn_heads * head_dim_qk * max_seqlen_q;
+      offsets_qkvo[0] = checked_mul(3 * num_attn_heads, head_dim_qk, tokens_q);
       offsets_qkvo[1] = offsets_qkvo[0];
       offsets_qkvo[2] = offsets_qkvo[0];
       break;
     case NVTE_QKV_Layout_Group::NVTE_HD_2HD:
     case NVTE_QKV_Layout_Group::NVTE_HD_H2D:
-      offsets_qkvo[0] = num_attn_heads * head_dim_qk * max_seqlen_q;
-      offsets_qkvo[1] = 2 * num_gqa_groups * head_dim_qk * max_seqlen_kv;
+      offsets_qkvo[0] = checked_mul(num_attn_heads, head_dim_qk, tokens_q);
+      offsets_qkvo[1] = checked_mul(2 * num_gqa_groups, head_dim_qk, tokens_kv);
       offsets_qkvo[2] = offsets_qkvo[1];
       break;
   }
 
-  offsets_qkvo[3] = num_attn_heads * head_dim_qk * max_seqlen_q;
+  offsets_qkvo[3] = checked_mul(num_attn_heads, head_dim_qk, tokens_q);
 
-  size_t max_offset = *std::max_element(offsets_qkvo.begin(), offsets_qkvo.end());
+  int64_t max_offset = *std::max_element(offsets_qkvo.begin(), offsets_qkvo.end());
   if (max_offset > std::numeric_limits<int32_t>::max()) {
     return DType::kInt64;
   }

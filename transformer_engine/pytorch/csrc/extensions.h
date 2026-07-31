@@ -82,6 +82,13 @@ NVTE_Fused_Attn_Backend get_fused_attn_backend(
     size_t max_seqlen_kv, size_t head_dim_qk, size_t head_dim_v, int64_t window_size_left,
     int64_t window_size_right, bool return_max_logit, bool cuda_graph, bool deterministic);
 
+// Width required for THD ragged offsets, given *physical* token counts. Exposed so the int32/int64
+// boundary can be tested directly: the interesting cases (h*d*t near INT32_MAX) are far too large
+// to allocate, so the arithmetic has to be checkable without a launch.
+int64_t get_ragged_offset_dtype_bits(NVTE_QKV_Layout qkv_layout, int64_t num_attn_heads,
+                                     int64_t num_gqa_groups, int64_t tokens_q, int64_t tokens_kv,
+                                     int64_t head_dim_qk, int64_t head_dim_v);
+
 std::vector<py::object> fused_attn_fwd(
     size_t max_seqlen_q, size_t max_seqlen_kv, bool is_training, float attn_scale, float p_dropout,
     bool set_zero, NVTE_QKV_Layout qkv_layout, NVTE_QKV_Format o_format,

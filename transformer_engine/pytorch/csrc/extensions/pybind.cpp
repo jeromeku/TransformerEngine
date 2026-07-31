@@ -341,6 +341,10 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         py::call_guard<py::gil_scoped_release>());
   m.def("get_fused_attn_backend", &transformer_engine::pytorch::get_fused_attn_backend,
         "Get Fused Attention backend", py::call_guard<py::gil_scoped_release>());
+  m.def("get_ragged_offset_dtype_bits",
+        &transformer_engine::pytorch::get_ragged_offset_dtype_bits,
+        "Bit width (32 or 64) required for THD ragged offsets, from physical token counts",
+        py::call_guard<py::gil_scoped_release>());
   m.def("compute_amax", &transformer_engine::pytorch::compute_amax,
         "Compute absolute max value in tensor", py::arg("input"), py::arg("amax"),
         py::call_guard<py::gil_scoped_release>());
