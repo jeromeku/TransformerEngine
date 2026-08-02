@@ -1966,6 +1966,18 @@ param_types_fp8_vs_f16 = [torch.float16, torch.bfloat16]
 qkv_layout_fp8_vs_f16 = ["sbh3d", "bshd_bshd_bshd", "sbhd_sbhd_sbhd"]
 qkv_format_fp8_vs_f16 = ["bshd", "sbhd"]
 
+# FP8 attention over packed (THD) input. Separate configs from the dense FP8 set above because
+# ragged offsets require a padding-family mask, and because the MLA shapes there have
+# head_dim_qk != head_dim_v, which the 3- and 2-way packed THD layouts cannot express.
+model_configs_fp8_vs_f16_thd = {
+    #    test:             ModelConfig(b, sq, hq, dqk)
+    "fp8_thd_1": ModelConfig(2, 2048, 16, 128, attn_mask_type="padding"),
+    "fp8_thd_2": ModelConfig(2, 2048, 16, 128, attn_mask_type="padding_causal"),
+    "fp8_thd_3": ModelConfig(2, 2048, 32, 128, num_gqa_groups=8, attn_mask_type="padding_causal"),
+    "fp8_thd_4": ModelConfig(2, 4096, 40, 128, num_gqa_groups=10, attn_mask_type="padding_causal"),
+}
+qkv_layout_fp8_vs_f16_thd = ["t3hd", "th3d", "thd_t2hd", "thd_th2d", "thd_thd_thd"]
+
 
 @pytest.mark.skipif(get_cudnn_version() < (9, 2, 1), reason="cuDNN 9.2.1+ is required.")
 @pytest.mark.skipif(not fp8_attn_available, reason=reason_for_no_fp8_attn)
@@ -2233,9 +2245,11 @@ def _run_mha_fp8_vs_f16(
 @pytest.mark.parametrize("fp8_dpa_bwd", [True, False])
 @pytest.mark.parametrize("is_training", [True, False])
 @pytest.mark.parametrize("scaling_mode", ["delayed", "current", "mxfp8"])
-def test_dpa_fp8_vs_f16(dtype, model, qkv_layout, fp8_dpa_bwd, is_training, scaling_mode):
+def test_dpa_fp8_vs_f16(
+    dtype, model, qkv_layout, fp8_dpa_bwd, is_training, scaling_mode, model_configs=None
+):
     """Test DotProductAttention module in FP8"""
-    config = model_configs_fp8_vs_f16[model]
+    config = (model_configs or model_configs_fp8_vs_f16)[model]
 
     # TODO(cyang): think of another way to verify dropout results
     # test cuDNN FP8 dropout
@@ -2414,6 +2428,28 @@ def test_dpa_fp8_vs_f16(dtype, model, qkv_layout, fp8_dpa_bwd, is_training, scal
                         True,
                     )
     os.environ["NVTE_UnfusedDPA_Emulate_FP8"] = "0"
+
+
+
+@pytest.mark.skipif(get_cudnn_version() < (9, 2, 1), reason="cuDNN 9.2.1+ is required.")
+@pytest.mark.skipif(not fp8_attn_available, reason=reason_for_no_fp8_attn)
+@pytest.mark.parametrize("dtype", param_types_fp8_vs_f16)
+@pytest.mark.parametrize("model", model_configs_fp8_vs_f16_thd.keys())
+@pytest.mark.parametrize("qkv_layout", qkv_layout_fp8_vs_f16_thd)
+@pytest.mark.parametrize("fp8_dpa_bwd", [True, False])
+@pytest.mark.parametrize("is_training", [True, False])
+@pytest.mark.parametrize("scaling_mode", ["delayed", "current"])
+def test_dpa_fp8_vs_f16_thd(dtype, model, qkv_layout, fp8_dpa_bwd, is_training, scaling_mode):
+    """Test DotProductAttention module in FP8 with packed (THD) input"""
+    test_dpa_fp8_vs_f16(
+        dtype,
+        model,
+        qkv_layout,
+        fp8_dpa_bwd,
+        is_training,
+        scaling_mode,
+        model_configs=model_configs_fp8_vs_f16_thd,
+    )
 
 
 def _run_dpa_fp8_vs_f16(dtype, config, fp8_dpa, qkv_layout, is_training, fp8_recipe):
