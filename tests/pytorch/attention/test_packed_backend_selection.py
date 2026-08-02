@@ -115,9 +115,15 @@ def selected_backend(config, layout="thd_thd_thd", mask="padding_causal", recipe
         pad_between_seqs=pad_between_seqs, is_training=is_training, fp8=fp8,
         fp8_meta={"recipe": rec} if rec is not None else None,
     )
-    # The chosen backend is cached; without invalidating it a previous query is returned.
+    # The chosen backend is cached, so invalidate before querying or a previous answer comes
+    # back. Invalidate afterwards too: this query leaves the cache holding a selection made for
+    # its own configuration, and the next attention call in this process would otherwise reuse it
+    # instead of selecting for itself.
     _attention_backends["backend_selection_requires_update"] = True
-    flash, _, fused, sub, unfused, _ = U.get_attention_backend(params)
+    try:
+        flash, _, fused, sub, unfused, _ = U.get_attention_backend(params)
+    finally:
+        _attention_backends["backend_selection_requires_update"] = True
     return ("FlashAttention" if flash else f"FusedAttention/{int(sub)}" if fused
             else "Unfused" if unfused else "NO_BACKEND")
 
