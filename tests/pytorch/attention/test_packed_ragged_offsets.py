@@ -32,6 +32,27 @@ from transformer_engine.common import recipe
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="device-only")
 
+@pytest.fixture(autouse=True)
+def _pin_fp8_backward():
+    """Pin the FP8 backward on for every test here, and restore what was there before.
+
+    The tolerances below were measured with it enabled. Another module in the same process can
+    assign this variable to drive its own parametrization, and a comparison calibrated for one
+    mode silently measures the other. Defence in depth: the module that assigns it also restores
+    it, and this does not rely on that.
+    """
+    name = "NVTE_FP8_DPA_BWD"
+    saved = os.environ.get(name)
+    os.environ[name] = "1"
+    try:
+        yield
+    finally:
+        if saved is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = saved
+
+
 INT32_MAX = 2**31 - 1
 
 THD_THD_THD = tex.NVTE_QKV_Layout.NVTE_THD_THD_THD

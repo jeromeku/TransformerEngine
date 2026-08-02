@@ -94,6 +94,34 @@ def reset_global_fp8_state():
 
 
 # Define F16 data types to test
+
+
+# These tests drive their parametrization by assigning environment variables that the attention
+# path reads process-globally. Restoring them matters beyond this file: without it every later
+# test in the process runs under whichever parameter executed last, and a packed backward
+# comparison that passes alone fails after a case that ran with the FP8 backward disabled.
+@pytest.fixture(autouse=True)
+def _restore_attention_environment():
+    names = (
+        "NVTE_FP8_DPA_BWD",
+        "NVTE_UnfusedDPA_Emulate_FP8",
+        "NVTE_FLASH_ATTN",
+        "NVTE_FUSED_ATTN",
+        "NVTE_UNFUSED_ATTN",
+    )
+    saved = {name: os.environ.get(name) for name in names}
+    try:
+        yield
+    finally:
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        # The chosen backend is cached, so restoring the variables is not enough on its own: the
+        # next selection would return whichever backend this test forced.
+        _attention_backends["backend_selection_requires_update"] = True
+
 param_types = [torch.float16]
 if is_bf16_available():
     param_types.append(torch.bfloat16)

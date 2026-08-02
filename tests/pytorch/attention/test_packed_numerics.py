@@ -18,6 +18,7 @@ the tail sequences, and a whole-tensor norm averages that away.
 """
 
 import math
+import os
 import pathlib
 import sys
 
@@ -33,6 +34,27 @@ from transformer_engine.common import recipe
 from packed_input_utils import PACKED_CONFIGS, as_layout, constructible, make_packed_batch
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="device-only")
+
+@pytest.fixture(autouse=True)
+def _pin_fp8_backward():
+    """Pin the FP8 backward on for every test here, and restore what was there before.
+
+    The tolerances below were measured with it enabled. Another module in the same process can
+    assign this variable to drive its own parametrization, and a comparison calibrated for one
+    mode silently measures the other. Defence in depth: the module that assigns it also restores
+    it, and this does not rely on that.
+    """
+    name = "NVTE_FP8_DPA_BWD"
+    saved = os.environ.get(name)
+    os.environ[name] = "1"
+    try:
+        yield
+    finally:
+        if saved is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = saved
+
 
 # Packed against dense at the same precision: quantization cancels, so this bounds the addressing
 # alone. Against a higher-precision reference the bound has to absorb quantization as well.
