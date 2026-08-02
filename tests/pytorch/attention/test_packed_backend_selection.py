@@ -5,8 +5,10 @@ worse than answering "unsupported", because the caller has no way to tell the di
 silent fallback. So the admitted set is pinned, the rejected set is pinned, and both are checked
 against what actually runs.
 
-Each probe runs in a clean subprocess. The selection path reads environment variables and caches
-the result, so an inherited flag from an earlier test can otherwise mask a regression.
+The selection path caches its answer, so every query invalidates that cache first; without it an
+earlier query's result is returned and a regression is invisible. The one test that is about an
+environment flag runs in a clean subprocess, because that is the only way to prove a stale value
+cannot mask the answer.
 
     python3 -m pytest test_packed_backend_selection.py -q -rs
 """
@@ -22,6 +24,7 @@ import textwrap
 
 import pytest
 import torch
+from transformer_engine.common import recipe
 
 _current_file = pathlib.Path(__file__).resolve()
 sys.path = [str(_current_file.parent), str(_current_file.parent.parent)] + sys.path
@@ -84,20 +87,53 @@ _QUERY = textwrap.dedent(
 )
 
 
-def selected_backend(config, layout="thd_thd_thd", mask="padding_causal", recipe="delayed",
+RECIPE_FACTORIES = {
+    "delayed": lambda: recipe.DelayedScaling(fp8_dpa=True),
+    "current": lambda: recipe.Float8CurrentScaling(fp8_dpa=True),
+    "mxfp8": lambda: recipe.MXFP8BlockScaling(),
+    "none": lambda: None,
+}
+
+
+def selected_backend(config, layout="thd_thd_thd", mask="padding_causal", recipe_name="delayed",
                      bias="no_bias", dropout=0.0, pad_between_seqs=False, is_training=True,
-                     fp8=True, env=None):
-    """The backend the selector chooses, resolved in a clean subprocess."""
-    payload = dict(layout=layout, mask=mask, recipe=recipe if fp8 else "none", bias=bias,
-                   dropout=dropout, pad_between_seqs=pad_between_seqs, is_training=is_training,
-                   fp8=fp8, heads=config.num_heads, groups=config.num_gqa_groups,
+                     fp8=True):
+    """The backend the selector chooses for this configuration."""
+    from transformer_engine.pytorch.attention.dot_product_attention import utils as U
+    from transformer_engine.pytorch.attention.dot_product_attention.dot_product_attention import (
+        _attention_backends,
+    )
+
+    rec = RECIPE_FACTORIES[recipe_name if fp8 else "none"]()
+    params = U.AttentionParams(
+        qkv_type=torch.Tensor, qkv_dtype=torch.bfloat16, qkv_layout=layout,
+        batch_size=3, num_heads=config.num_heads, num_gqa_groups=config.num_gqa_groups,
+        max_seqlen_q=2048, max_seqlen_kv=2048,
+        head_dim_qk=config.head_dim_qk, head_dim_v=config.head_dim_v,
+        attn_mask_type=mask, window_size=(-1, 0) if "causal" in mask else (-1, -1),
+        core_attention_bias_type=bias, attention_dropout=dropout,
+        pad_between_seqs=pad_between_seqs, is_training=is_training, fp8=fp8,
+        fp8_meta={"recipe": rec} if rec is not None else None,
+    )
+    # The chosen backend is cached; without invalidating it a previous query is returned.
+    _attention_backends["backend_selection_requires_update"] = True
+    flash, _, fused, sub, unfused, _ = U.get_attention_backend(params)
+    return ("FlashAttention" if flash else f"FusedAttention/{int(sub)}" if fused
+            else "Unfused" if unfused else "NO_BACKEND")
+
+
+def selected_backend_in_child(config, env=None):
+    """The same query in a clean process, for the case where an environment flag is the subject."""
+    payload = dict(layout="thd_thd_thd", mask="padding_causal", recipe="delayed", bias="no_bias",
+                   dropout=0.0, pad_between_seqs=False, is_training=True, fp8=True,
+                   heads=config.num_heads, groups=config.num_gqa_groups,
                    head_dim_qk=config.head_dim_qk, head_dim_v=config.head_dim_v)
     child = {k: v for k, v in os.environ.items() if k != "NVTE_FP8_THD_EXPERIMENTAL"}
     if env:
         child.update(env)
     out = subprocess.run([sys.executable, "-c", _QUERY, json.dumps(payload)],
                          capture_output=True, text=True, env=child, timeout=600)
-    assert out.returncode == 0, f"query failed for {payload}:\n{out.stderr[-2000:]}"
+    assert out.returncode == 0, f"query failed:\n{out.stderr[-2000:]}"
     return json.loads(out.stdout.strip().splitlines()[-1])
 
 
@@ -106,7 +142,7 @@ _EXECUTE = textwrap.dedent(
     import json, math, sys, torch
     import transformer_engine.pytorch as te
     from transformer_engine.common import recipe
-
+    
     cfg = json.loads(sys.argv[1])
     seqlens = [128, 64, 256, 64]
     heads, groups, dim, total = cfg["heads"], cfg["groups"], cfg["head_dim_qk"], sum(seqlens)
@@ -161,7 +197,8 @@ def test_admitted_configurations_select_the_fp8_backend(layout, config_name, mas
     Catches the enablement narrowing silently. A combination that quietly falls back to a
     higher-precision backend still produces plausible numbers, so nothing else would notice.
     """
-    got = selected_backend(PACKED_CONFIGS[config_name], layout=layout, mask=mask, recipe=recipe)
+    got = selected_backend(PACKED_CONFIGS[config_name], layout=layout, mask=mask,
+                             recipe_name=recipe)
     assert got == FP8_SUB_BACKEND, (
         f"{layout} {config_name} {mask} {recipe} selected {got!r}"
     )
@@ -223,7 +260,7 @@ def test_block_scaled_recipes_are_rejected():
     Its scale-factor layout is a separate problem from per-tensor scaling, and admitting it would
     hand the kernel scales it cannot interpret.
     """
-    got = selected_backend(PACKED_CONFIGS["omnii_8b_tp1"], recipe="mxfp8")
+    got = selected_backend(PACKED_CONFIGS["omnii_8b_tp1"], recipe_name="mxfp8")
     assert got != FP8_SUB_BACKEND
 
 
@@ -305,9 +342,9 @@ def test_no_experimental_gate_remains():
     Catches a gate surviving in one of the two places. A flag still read by the C++ would make the
     feature unreachable in a default build even though the Python selector admits it.
     """
-    with_flag = selected_backend(PACKED_CONFIGS["omnii_8b_tp1"],
-                                 env={"NVTE_FP8_THD_EXPERIMENTAL": "1"})
-    without = selected_backend(PACKED_CONFIGS["omnii_8b_tp1"])
+    with_flag = selected_backend_in_child(PACKED_CONFIGS["omnii_8b_tp1"],
+                                          env={"NVTE_FP8_THD_EXPERIMENTAL": "1"})
+    without = selected_backend_in_child(PACKED_CONFIGS["omnii_8b_tp1"])
     assert with_flag == without == FP8_SUB_BACKEND, "the flag still changes the answer"
 
     source = os.path.join(os.path.dirname(__file__), "..", "..", "..",
