@@ -14,11 +14,15 @@ ragged-offset multiplier, which is what makes the distinction worth testing.
 
 from __future__ import annotations
 
+import pathlib
 import random
+import sys
 from dataclasses import dataclass
 
 import torch
 
+_current_file = pathlib.Path(__file__).resolve()
+sys.path = [str(_current_file.parent.parent)] + sys.path
 from utils import ModelConfig
 
 DEVICE = "cuda"
