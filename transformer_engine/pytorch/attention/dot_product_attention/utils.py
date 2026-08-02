@@ -959,6 +959,16 @@ def get_attention_backend(
                     softmax_type,
                 )
                 use_unfused_attention = False
+            if use_fused_attention and qkv_format == "thd":
+                # The softmax offset gradient is wrong for packed input in FP8: measured against a
+                # same-precision dense reference the output and the query, key and value gradients
+                # agree while the offset gradient does not. Admitting this would return a plausible
+                # result with a silently corrupt gradient, so it is refused until that is fixed.
+                logger.debug(
+                    "Disabling FusedAttention for softmax_type = %s in FP8 with qkv_format = thd",
+                    softmax_type,
+                )
+                use_fused_attention = False
         if qkv_format == "thd" and cudnn_version < (9, 18, 0):
             logger.debug(
                 "Disabling FusedAttention for softmax_type = %s, qkv_format = thd and cuDNN"

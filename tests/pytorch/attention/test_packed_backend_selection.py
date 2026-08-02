@@ -97,7 +97,7 @@ RECIPE_FACTORIES = {
 
 def selected_backend(config, layout="thd_thd_thd", mask="padding_causal", recipe_name="delayed",
                      bias="no_bias", dropout=0.0, pad_between_seqs=False, is_training=True,
-                     fp8=True):
+                     fp8=True, softmax_type="vanilla"):
     """The backend the selector chooses for this configuration."""
     from transformer_engine.pytorch.attention.dot_product_attention import utils as U
     from transformer_engine.pytorch.attention.dot_product_attention.dot_product_attention import (
@@ -113,6 +113,7 @@ def selected_backend(config, layout="thd_thd_thd", mask="padding_causal", recipe
         attn_mask_type=mask, window_size=(-1, 0) if "causal" in mask else (-1, -1),
         core_attention_bias_type=bias, attention_dropout=dropout,
         pad_between_seqs=pad_between_seqs, is_training=is_training, fp8=fp8,
+        softmax_type=softmax_type,
         fp8_meta={"recipe": rec} if rec is not None else None,
     )
     # The chosen backend is cached, so invalidate before querying or a previous answer comes
@@ -444,3 +445,48 @@ def test_fp8_gradients_are_not_identical_to_bf16():
     assert not torch.equal(run(fp8=True), run(fp8=False)), (
         "FP8 and BF16 gradients are bitwise identical, so the FP8 backward did not run"
     )
+
+
+# --------------------------------------------------------------------------------------
+# softmax variants
+# --------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("softmax_type", ["learnable", "off-by-one"])
+def test_fp8_packed_rejects_non_vanilla_softmax(softmax_type):
+    """FP8 over packed input is refused for any softmax carrying an offset.
+
+    The offset gradient is wrong there: measured against a same-precision dense reference, the
+    output and the query, key and value gradients agree while the offset gradient does not. Every
+    finiteness and magnitude check passes, so admitting this returns a plausible result with a
+    silently corrupt gradient. It is refused until the gradient is fixed.
+    """
+    got = selected_backend(PACKED_CONFIGS["omnii_8b_tp1"], fp8=True, softmax_type=softmax_type)
+    assert got != FP8_SUB_BACKEND, f"FP8 packed admitted softmax_type={softmax_type}: {got!r}"
+
+
+@pytest.mark.parametrize("softmax_type", ["learnable", "off-by-one"])
+def test_bf16_packed_still_admits_non_vanilla_softmax(softmax_type):
+    """The refusal above is specific to FP8 and must not reach BF16.
+
+    Sliding-window layers use a learnable offset over packed input in BF16, so a refusal that
+    caught this would disable a path in production use.
+    """
+    got = selected_backend(PACKED_CONFIGS["omnii_8b_tp1"], fp8=False, softmax_type=softmax_type)
+    assert got.startswith("FusedAttention"), (
+        f"BF16 packed lost softmax_type={softmax_type}: {got!r}"
+    )
+
+
+@pytest.mark.parametrize("softmax_type", ["learnable", "off-by-one"])
+def test_dense_fp8_still_admits_non_vanilla_softmax(softmax_type):
+    """The refusal is specific to packed input and must not reach dense FP8."""
+    got = selected_backend(PACKED_CONFIGS["omnii_8b_tp1"], layout="bshd_bshd_bshd", fp8=True,
+                           softmax_type=softmax_type)
+    assert got == FP8_SUB_BACKEND, f"dense FP8 lost softmax_type={softmax_type}: {got!r}"
+
+
+def test_fp8_packed_still_admits_vanilla_softmax():
+    """The refusal must not reach the configuration production actually runs."""
+    got = selected_backend(PACKED_CONFIGS["omnii_8b_tp1"], fp8=True, softmax_type="vanilla")
+    assert got == FP8_SUB_BACKEND, f"FP8 packed lost vanilla softmax: {got!r}"
