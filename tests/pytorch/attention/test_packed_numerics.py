@@ -651,3 +651,39 @@ def test_a_quantized_output_is_numerically_right():
     for i in range(batch.batch_size):
         err = relative_rms(batch.sequence(low, i), batch.sequence(high, i))
         assert err < 0.15, f"sequence {i}: quantized against high-precision output {err:.4f}"
+
+
+# --------------------------------------------------------------------------------------
+# inference
+# --------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("config_name", ["omnii_8b_tp1", "omnii_15b_tp1", "mha_d128"])
+def test_forward_matches_padded_without_a_backward(config_name):
+    """The inference direction agrees with the dense equivalent.
+
+    The selector admits this direction, and it takes a path that skips the backward setup
+    entirely, so a fault there is invisible to every test above: they all run a backward and
+    therefore only ever exercise the training path.
+    """
+    batch = make_packed_batch(PACKED_CONFIGS[config_name], "tile_aligned")
+    packed_module = _attention(batch.config, "thd", "padding")
+    dense_module = _attention(batch.config, "bshd", "padding")
+    packed_module.eval()
+    dense_module.eval()
+    kwargs = dict(cu_seqlens_q=batch.cu_seqlens, cu_seqlens_kv=batch.cu_seqlens,
+                  max_seqlen_q=batch.max_seqlen, max_seqlen_kv=batch.max_seqlen,
+                  attn_mask_type="padding")
+    dense_q, dense_k, dense_v = batch.padded()
+
+    with torch.no_grad():
+        with te.fp8_autocast(enabled=True, fp8_recipe=recipe.DelayedScaling(fp8_dpa=True)):
+            packed = packed_module(batch.q, batch.k, batch.v, **kwargs)
+            dense = dense_module(dense_q, dense_k, dense_v, **kwargs)
+    packed = packed.reshape(batch.total_tokens, batch.config.num_heads,
+                            batch.config.head_dim_v)
+    dense = dense.reshape(batch.batch_size, batch.max_seqlen, batch.config.num_heads,
+                          batch.config.head_dim_v)
+    for i in range(batch.batch_size):
+        err = relative_rms(batch.sequence(packed, i), dense[i, : batch.seqlens[i]])
+        assert err < 0.05, f"sequence {i}: inference packed against dense {err:.4f}"

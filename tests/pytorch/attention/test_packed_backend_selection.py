@@ -220,12 +220,18 @@ def test_both_training_directions_are_admitted(is_training):
 # --------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("mask", ["no_mask", "causal", "causal_bottom_right"])
-def test_non_padding_masks_are_rejected(mask):
-    """Ragged offsets require a padding-family mask.
+@pytest.mark.parametrize("mask", ["no_mask", "causal", "causal_bottom_right",
+                                  "padding_causal_bottom_right"])
+def test_masks_outside_the_admitted_pair_are_rejected(mask):
+    """Only padding and padding_causal are admitted over packed input.
 
-    Without a padding mask there is no cu_seqlens for the kernel to derive offsets from, so the
-    combination has to be refused rather than silently reinterpreted.
+    The first three carry no padding information, so there is no cu_seqlens for the kernel to
+    derive offsets from and the combination has to be refused rather than reinterpreted.
+
+    `padding_causal_bottom_right` is a padding-family mask and is nonetheless rejected, which is
+    worth pinning rather than leaving to be rediscovered: it aligns the causal diagonal to the
+    bottom right of each sequence, and no packed FP8 kernel implements that alignment. It is
+    admitted for dense input, so its absence here is a property of this path specifically.
     """
     got = selected_backend(PACKED_CONFIGS["omnii_8b_tp1"], mask=mask)
     assert got != FP8_SUB_BACKEND, f"{mask} was admitted"
