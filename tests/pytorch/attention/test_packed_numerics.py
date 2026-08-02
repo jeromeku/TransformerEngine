@@ -451,3 +451,203 @@ def test_backward_with_a_quantized_output():
     plain = run_backward(batch, fp8_output=False)
     quantized = run_backward(batch, fp8_output=True)
     compare_per_sequence(batch, quantized, plain, PRECISION_TOLERANCE, label="quantized output ")
+
+
+# --------------------------------------------------------------------------------------
+# layouts, forward
+# --------------------------------------------------------------------------------------
+
+LAYOUT_PAIRS = [(l, c) for l, c in constructible()
+                if c in ("mha_d64", "mha_d128", "omnii_8b_tp1")]
+
+
+@pytest.mark.parametrize("layout,config_name", LAYOUT_PAIRS)
+def test_forward_every_layout(layout, config_name):
+    """Each packed layout gives the same answer as BF16 on the same logical data.
+
+    Catches a wrong ragged-offset multiplier for that layout. Separate buffers carry one product
+    per token, the 3-way packed layouts three, and the key-value packed layouts two.
+    """
+    batch = make_packed_batch(PACKED_CONFIGS[config_name], "tile_aligned")
+    fp8 = run_forward(batch, layout=layout)
+    bf16 = run_forward(batch, layout=layout, fp8=False)
+    for i in range(batch.batch_size):
+        err = relative_rms(batch.sequence(fp8, i), batch.sequence(bf16, i))
+        assert err < FORWARD_PRECISION_TOLERANCE, f"{layout}/{config_name} sequence {i}: {err:.4f}"
+
+
+@pytest.mark.parametrize("layout", ["t3hd", "th3d", "thd_t2hd", "thd_th2d"])
+def test_forward_interleaved_layouts_match_separate_buffers(layout):
+    """An interleaved layout agrees with separate buffers on identical data.
+
+    Catches a multiplier that is self-consistent but wrong. The comparison against BF16 above would
+    pass if both precisions shared the same mistake, since both derive offsets the same way.
+    """
+    batch = make_packed_batch(PACKED_CONFIGS["mha_d64"], "tile_aligned")
+    separate = run_forward(batch, layout="thd_thd_thd")
+    interleaved = run_forward(batch, layout=layout)
+    for i in range(batch.batch_size):
+        err = relative_rms(batch.sequence(interleaved, i), batch.sequence(separate, i))
+        assert err < 1e-3, f"{layout} against separate buffers, sequence {i}: {err:.2e}"
+
+
+def test_forward_current_scaling():
+    """The other admitted recipe, which recomputes the scale per step from the packed tensor."""
+    batch = make_packed_batch(PACKED_CONFIGS["mha_d128"], "tile_aligned")
+    fp8 = run_forward(batch, rec="current")
+    bf16 = run_forward(batch, fp8=False)
+    for i in range(batch.batch_size):
+        err = relative_rms(batch.sequence(fp8, i), batch.sequence(bf16, i))
+        assert err < FORWARD_PRECISION_TOLERANCE, f"current scaling sequence {i}: {err:.4f}"
+
+
+# --------------------------------------------------------------------------------------
+# softmax statistics
+# --------------------------------------------------------------------------------------
+
+
+def capture_softmax_stats(fn):
+    """Run `fn` and return its result with the softmax statistics tensor.
+
+    The statistics are an auxiliary output of the fused forward and are not reachable through the
+    module's public interface, so they have to be intercepted.
+    """
+    import transformer_engine_torch as tex
+
+    grabbed = {}
+    original = tex.fused_attn_fwd
+
+    def wrapper(*args, **kwargs):
+        out = original(*args, **kwargs)
+        grabbed.setdefault("stats", out[1])
+        return out
+
+    tex.fused_attn_fwd = wrapper
+    try:
+        return fn(), grabbed.get("stats")
+    finally:
+        tex.fused_attn_fwd = original
+
+
+def test_softmax_statistics_are_packed():
+    """The statistics come back packed, one entry per token, not dense per batch and position.
+
+    A shape regressing to the dense form faults host-side, so this is a standing guard.
+    """
+    batch = make_packed_batch(PACKED_CONFIGS["mha_d64"], "tile_aligned")
+    _, stats = capture_softmax_stats(lambda: run_forward(batch))
+    assert stats is not None, "did not capture the softmax statistics"
+    assert tuple(stats.shape) == (batch.total_tokens, batch.config.num_heads, 1), (
+        f"statistics shape {tuple(stats.shape)}, expected packed "
+        f"({batch.total_tokens}, {batch.config.num_heads}, 1)"
+    )
+
+
+def test_softmax_statistics_are_addressed_correctly():
+    """Per-sequence log-sum-exp matches the value computed directly from the same inputs.
+
+    The statistics offset carries the head count rather than the head count times the head
+    dimension, and a wrong multiplier there is invisible in the forward output, because the kernel
+    normalises softmax internally. It is fatal in the backward, which consumes these as
+    log-sum-exp, so it can only be caught by observing them directly.
+    """
+    batch = make_packed_batch(PACKED_CONFIGS["mha_d64"], "tile_aligned")
+    _, stats = capture_softmax_stats(lambda: run_forward(batch))
+    assert stats is not None
+    stats = stats.reshape(batch.total_tokens, batch.config.num_heads)
+
+    scale = 1.0 / math.sqrt(batch.config.head_dim_qk)
+    for i in range(batch.batch_size):
+        q = batch.sequence(batch.q, i).float()
+        k = batch.sequence(batch.k, i).float()
+        scores = torch.matmul(q.permute(1, 0, 2),
+                              k.permute(1, 0, 2).transpose(-1, -2)) * scale
+        n = scores.shape[-1]
+        causal = torch.ones(n, n, dtype=torch.bool, device=scores.device).tril()
+        scores = scores.masked_fill(~causal, float("-inf"))
+        want = torch.logsumexp(scores, dim=-1).permute(1, 0)
+        err = relative_rms(batch.sequence(stats, i), want)
+        assert err < 0.05, (
+            f"sequence {i}: log-sum-exp {err:.4f}. A wrong statistics offset multiplier looks "
+            f"exactly like this and corrupts the backward while leaving the forward correct."
+        )
+
+
+# --------------------------------------------------------------------------------------
+# one layer up
+# --------------------------------------------------------------------------------------
+
+
+def test_multihead_attention_packed_matches_bf16():
+    """A full multi-head attention layer in FP8 tracks its BF16 self on packed input.
+
+    Every other test here supplies query, key and value tensors it packed itself. This exercises
+    the path where the layer builds them from its own fused projection and hands them down with a
+    layout it chose, which is otherwise never reached under packed FP8.
+    """
+    torch.manual_seed(0)
+    batch = make_packed_batch(PACKED_CONFIGS["mha_d128"], "tile_aligned")
+    heads, dim = batch.config.num_heads, batch.config.head_dim_qk
+    hidden = heads * dim
+
+    layer = te.MultiheadAttention(
+        hidden_size=hidden, num_attention_heads=heads, kv_channels=dim,
+        attention_dropout=0.0, qkv_format="thd", attn_mask_type="padding_causal",
+        params_dtype=torch.bfloat16, fuse_qkv_params=True,
+    ).cuda()
+
+    x = torch.randn(batch.total_tokens, hidden, device="cuda", dtype=torch.bfloat16) * 0.1
+    kwargs = dict(cu_seqlens_q=batch.cu_seqlens, cu_seqlens_kv=batch.cu_seqlens,
+                  max_seqlen_q=batch.max_seqlen, max_seqlen_kv=batch.max_seqlen,
+                  attn_mask_type="padding_causal")
+
+    with torch.no_grad():
+        with te.fp8_autocast(enabled=True, fp8_recipe=recipe.DelayedScaling(fp8_dpa=True)):
+            fp8 = layer(x, **kwargs)
+        bf16 = layer(x, **kwargs)
+    fp8 = fp8[0] if isinstance(fp8, tuple) else fp8
+    bf16 = bf16[0] if isinstance(bf16, tuple) else bf16
+
+    for i in range(batch.batch_size):
+        err = relative_rms(batch.sequence(fp8, i), batch.sequence(bf16, i))
+        assert err < 0.2, f"sequence {i} (len {batch.seqlens[i]}): {err:.4f}"
+
+
+def test_a_quantized_output_is_really_quantized():
+    """Requesting a quantized output returns one, rather than a dequantized high-precision tensor.
+
+    A fallback here preserves correctness, so no numerical test would see it; it shows up only as
+    lost memory saving and an unexpected dtype downstream.
+    """
+    batch = make_packed_batch(PACKED_CONFIGS["mha_d128"], "tile_aligned")
+    module = _attention(batch.config, "thd", "padding_causal")
+    kwargs = dict(cu_seqlens_q=batch.cu_seqlens, cu_seqlens_kv=batch.cu_seqlens,
+                  max_seqlen_q=batch.max_seqlen, max_seqlen_kv=batch.max_seqlen,
+                  attn_mask_type="padding_causal", fp8_output=True)
+    with te.fp8_autocast(enabled=True, fp8_recipe=recipe.DelayedScaling(fp8_dpa=True)):
+        out = module(batch.q, batch.k, batch.v, **kwargs)
+    quantized = getattr(out, "_data", None) is not None or out.dtype in (
+        torch.float8_e4m3fn, torch.float8_e5m2)
+    assert quantized, f"a quantized output was requested and a {out.dtype} tensor came back"
+
+
+def test_a_quantized_output_is_numerically_right():
+    """The quantized-output run agrees with the high-precision-output run.
+
+    Catches a wrong output scale or a mis-strided quantized write under ragged addressing. The
+    dtype check above says the path ran; this says it ran correctly.
+    """
+    batch = make_packed_batch(PACKED_CONFIGS["mha_d128"], "tile_aligned")
+    module = _attention(batch.config, "thd", "padding_causal")
+    base = dict(cu_seqlens_q=batch.cu_seqlens, cu_seqlens_kv=batch.cu_seqlens,
+                max_seqlen_q=batch.max_seqlen, max_seqlen_kv=batch.max_seqlen,
+                attn_mask_type="padding_causal")
+    with te.fp8_autocast(enabled=True, fp8_recipe=recipe.DelayedScaling(fp8_dpa=True)):
+        high = module(batch.q, batch.k, batch.v, **base)
+        low = module(batch.q, batch.k, batch.v, **base, fp8_output=True)
+    low = low.dequantize() if hasattr(low, "dequantize") else low.to(torch.bfloat16)
+    shape = (batch.total_tokens, batch.config.num_heads, batch.config.head_dim_v)
+    high, low = high.reshape(shape), low.reshape(shape)
+    for i in range(batch.batch_size):
+        err = relative_rms(batch.sequence(low, i), batch.sequence(high, i))
+        assert err < 0.15, f"sequence {i}: quantized against high-precision output {err:.4f}"
