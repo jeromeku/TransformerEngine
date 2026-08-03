@@ -40,7 +40,9 @@ behaviour they protect is a performance property, measured separately.
 
 from __future__ import annotations
 
+import json
 import math
+import os
 import subprocess
 import sys
 import textwrap
@@ -366,4 +368,134 @@ def test_many_one_token_documents_stay_linear_in_document_count():
         f"4,096 one-token documents peaked at {large:.3f} GiB against {small:.3f} GiB for 512 of "
         f"them, a ratio of {ratio:.1f} for an eightfold document count. Growth that is faster than "
         f"linear means the sequence extent is being inflated as well"
+    )
+
+
+# --------------------------------------------------------------------------------------
+# Graph cache. The point of bucketing is that many distinct input shapes share one cuDNN graph.
+# Until the counters existed that could only be inferred from timing, and timing said the wrong
+# thing at least once: a window reporting 108 new input shapes turned out to contain exactly one
+# cold graph. These read the caches directly.
+#
+# Each case runs in a subprocess. The caches are process-lifetime and resetting the counters does
+# not evict them, so a second test in the same process would see the first one's entries.
+# --------------------------------------------------------------------------------------
+
+_CACHE_WORKLOAD = textwrap.dedent(
+    """
+    import json, math, sys, torch
+    import transformer_engine.pytorch as te
+    import transformer_engine_torch as tex
+    from transformer_engine.common import recipe
+
+    rows = json.loads(sys.argv[1])
+    heads, gqa_groups, head_dim = 32, 8, 128
+    module = te.DotProductAttention(
+        num_attention_heads=heads, kv_channels=head_dim, num_gqa_groups=gqa_groups,
+        attention_dropout=0.0, qkv_format="thd", attn_mask_type="padding_causal",
+        softmax_scale=1.0 / math.sqrt(head_dim)).cuda()
+
+    tex.reset_fused_attn_fp8_cache_stats()
+    for lengths in rows:
+        total = sum(lengths)
+        cu_seqlens = torch.tensor([0] + list(torch.cumsum(torch.tensor(lengths), 0)),
+                                  dtype=torch.int32, device="cuda")
+        def draw(count):
+            return torch.randn(total, count, head_dim, device="cuda",
+                               dtype=torch.bfloat16).requires_grad_(True)
+        q, k, v = draw(heads), draw(gqa_groups), draw(gqa_groups)
+        with te.fp8_autocast(enabled=True, fp8_recipe=recipe.DelayedScaling(fp8_dpa=True)):
+            out = module(q, k, v, cu_seqlens_q=cu_seqlens, cu_seqlens_kv=cu_seqlens,
+                         max_seqlen_q=max(lengths), max_seqlen_kv=max(lengths))
+        torch.autograd.grad(out, (q, k, v), torch.randn_like(out))
+    torch.cuda.synchronize()
+    print("stats " + json.dumps(tex.get_fused_attn_fp8_cache_stats()))
+    """
+)
+
+
+CACHE_STATS = "NVTE_FP8_ATTN_CACHE_STATS"
+
+
+def cache_stats(rows: list[list[int]], timeout: int = 900) -> dict:
+    """Run these packed rows in a clean process and return the FP8 graph cache counters.
+
+    Collection is off by default, so the subprocess sets the flag. The `enabled` field is asserted
+    by every caller: without that check a disabled build reports zeros, and a zero entry count reads
+    as "no graphs were built" rather than "nothing was counted".
+    """
+    env = dict(os.environ, **{CACHE_STATS: "1"})
+    proc = subprocess.run([sys.executable, "-c", _CACHE_WORKLOAD, json.dumps(rows)],
+                          capture_output=True, text=True, timeout=timeout, env=env)
+    line = next((l for l in proc.stdout.splitlines() if l.startswith("stats ")), None)
+    assert line is not None, (
+        f"workload did not complete:\n{proc.stdout[-2000:]}\n{proc.stderr[-2000:]}")
+    return json.loads(line[len("stats "):])
+
+
+# Longest documents 1100 through 2000: ten distinct values, all inside the 2048 bucket.
+ONE_BUCKET_ROWS = [[length, 2100 - length] for length in range(1100, 2001, 100)]
+
+# Longest documents in the 2048, 4096 and 8192 buckets.
+THREE_BUCKET_ROWS = [[1500, 500], [3000, 500], [5000, 500]]
+
+
+def test_distinct_shapes_in_one_bucket_share_one_graph():
+    """Ten different longest-document values build exactly one graph, in each direction.
+
+    This is the property the whole fix exists to produce, asserted from the cache rather than
+    inferred from a stopwatch. Before the fix these ten rows would have built ten graphs each way.
+    """
+    require_idle_device()
+    stats = cache_stats(ONE_BUCKET_ROWS)
+    assert stats["enabled"], "counter collection is off, so every count below would be a vacuous 0"
+    assert stats["fprop_entries"] == 1, (
+        f"ten distinct longest-document values built {stats['fprop_entries']} forward graphs; "
+        f"they all fall in the 2048 bucket and should share one"
+    )
+    assert stats["bprop_entries"] == 1, (
+        f"{stats['bprop_entries']} backward graphs for the same ten rows"
+    )
+    # Without this the entry assertions would also pass if attention never ran at all.
+    assert stats["fprop_hits"] > 0 and stats["bprop_hits"] > 0, (
+        f"no cache hits recorded, so the counters are not observing a live cache: {stats}"
+    )
+
+
+def test_crossing_a_bucket_builds_another_graph():
+    """Negative control for the test above.
+
+    Without it, `fprop_entries == 1` passes just as well if the counter is stuck at one, if the
+    cache key collapsed everything, or if bucketing were replaced by a constant. Three rows in
+    three different buckets must produce three graphs.
+    """
+    require_idle_device()
+    stats = cache_stats(THREE_BUCKET_ROWS)
+    assert stats["enabled"], "counter collection is off, so every count below would be a vacuous 0"
+    assert stats["fprop_entries"] == len(THREE_BUCKET_ROWS), (
+        f"three rows in three different buckets built {stats['fprop_entries']} forward graphs, "
+        f"expected {len(THREE_BUCKET_ROWS)}; the counter does not track graph creation"
+    )
+    assert stats["bprop_entries"] == len(THREE_BUCKET_ROWS), (
+        f"{stats['bprop_entries']} backward graphs, expected {len(THREE_BUCKET_ROWS)}"
+    )
+
+
+def test_cache_counters_are_off_by_default():
+    """The counters are diagnostic and must not collect unless asked.
+
+    Also the negative control for `enabled`: if the field were hardcoded true, or if the gate were
+    ignored, this fails.
+    """
+    require_idle_device()
+    proc = subprocess.run(
+        [sys.executable, "-c", _CACHE_WORKLOAD, json.dumps(THREE_BUCKET_ROWS)],
+        capture_output=True, text=True, timeout=900,
+        env={k: v for k, v in os.environ.items() if k != CACHE_STATS})
+    line = next((l for l in proc.stdout.splitlines() if l.startswith("stats ")), None)
+    assert line is not None, f"workload did not complete:\n{proc.stderr[-2000:]}"
+    stats = json.loads(line[len("stats "):])
+    assert not stats["enabled"], "counters report enabled without the flag set"
+    assert stats["fprop_lookups"] == 0 and stats["bprop_lookups"] == 0, (
+        f"counters collected without the flag set: {stats}"
     )

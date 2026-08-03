@@ -137,6 +137,23 @@ NVTE_Fused_Attn_Backend get_fused_attn_backend(
   return fused_attention_backend;
 }
 
+py::dict get_fused_attn_fp8_cache_stats() {
+  NVTEFusedAttnFP8CacheStats stats = nvte_get_fused_attn_fp8_cache_stats();
+  py::dict out;
+  out["enabled"] = stats.enabled != 0;
+  out["fprop_lookups"] = stats.fprop_lookups;
+  out["fprop_hits"] = stats.fprop_hits;
+  out["fprop_misses"] = stats.fprop_lookups - stats.fprop_hits;
+  out["fprop_entries"] = stats.fprop_entries;
+  out["bprop_lookups"] = stats.bprop_lookups;
+  out["bprop_hits"] = stats.bprop_hits;
+  out["bprop_misses"] = stats.bprop_lookups - stats.bprop_hits;
+  out["bprop_entries"] = stats.bprop_entries;
+  return out;
+}
+
+void reset_fused_attn_fp8_cache_stats() { nvte_reset_fused_attn_fp8_cache_stats(); }
+
 int64_t get_ragged_offset_dtype_bits(NVTE_QKV_Layout qkv_layout, int64_t num_attn_heads,
                                      int64_t num_gqa_groups, int64_t tokens_q, int64_t tokens_kv,
                                      int64_t head_dim_qk, int64_t head_dim_v) {

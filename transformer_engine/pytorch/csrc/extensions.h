@@ -85,6 +85,10 @@ NVTE_Fused_Attn_Backend get_fused_attn_backend(
 // Width required for THD ragged offsets, given *physical* token counts. Exposed so the int32/int64
 // boundary can be tested directly: the interesting cases (h*d*t near INT32_MAX) are far too large
 // to allocate, so the arithmetic has to be checkable without a launch.
+py::dict get_fused_attn_fp8_cache_stats();
+
+void reset_fused_attn_fp8_cache_stats();
+
 int64_t get_ragged_offset_dtype_bits(NVTE_QKV_Layout qkv_layout, int64_t num_attn_heads,
                                      int64_t num_gqa_groups, int64_t tokens_q, int64_t tokens_kv,
                                      int64_t head_dim_qk, int64_t head_dim_v);

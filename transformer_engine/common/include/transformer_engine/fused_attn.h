@@ -638,6 +638,42 @@ void nvte_multi_tensor_transpose_to_bhsd(NVTETensor *inputs, NVTETensor *outputs
 void nvte_multi_tensor_pad_last_dim(NVTETensor *inputs, NVTETensor *outputs, size_t num_tensors,
                                     cudaStream_t stream);
 
+/*! \brief Counters for the FP8 fused-attention cuDNN graph caches.
+ *
+ *  The caches are keyed on FADescriptor_v1, which carries the batch and both sequence extents. For
+ *  ragged (THD) input the extents are bucketed before the descriptor is built, so many distinct
+ *  input shapes share one graph; these counters are how a test tells the two apart, and how a
+ *  regression that reintroduces per-shape graph construction is caught without timing anything.
+ *
+ *  Collection is off unless NVTE_FP8_ATTN_CACHE_STATS is set: this is diagnostic instrumentation,
+ *  nothing in the implementation reads it, and it does not belong in the production path. Check
+ *  `enabled` before asserting on any count, or a disabled build reads as a cache that built nothing.
+ *
+ *  Process-wide, not thread-local, because PyTorch runs backward on an autograd worker thread and
+ *  thread-local backward counters would always read as zero from the forward thread. The caches
+ *  themselves remain thread-local, so `entries` is the size of the last cache written rather than a
+ *  sum; with one forward thread and one autograd thread each count is exact for its own cache.
+ */
+typedef struct {
+  int enabled;           /*!< nonzero when NVTE_FP8_ATTN_CACHE_STATS is set; all counts are 0 if not */
+  size_t fprop_lookups;  /*!< forward cache queries */
+  size_t fprop_hits;     /*!< forward queries served from the cache; misses are lookups - hits */
+  size_t fprop_entries;  /*!< distinct graphs held by the forward cache */
+  size_t bprop_lookups;  /*!< backward cache queries */
+  size_t bprop_hits;     /*!< backward queries served from the cache */
+  size_t bprop_entries;  /*!< distinct graphs held by the backward cache */
+} NVTEFusedAttnFP8CacheStats;
+
+/*! \brief Read the FP8 fused-attention graph cache counters for the calling thread. */
+NVTEFusedAttnFP8CacheStats nvte_get_fused_attn_fp8_cache_stats();
+
+/*! \brief Zero the FP8 fused-attention graph cache counters for the calling thread.
+ *
+ *  Does not evict anything: entry counts reset to zero and are restored on the next insert, so a
+ *  reset followed by cache hits alone reports zero entries.
+ */
+void nvte_reset_fused_attn_fp8_cache_stats();
+
 #ifdef __cplusplus
 }  // extern "C"
 
