@@ -15,6 +15,45 @@ namespace fused_attn {
 
 using namespace transformer_engine;
 
+namespace {
+
+// Round a THD sequence extent up to a bucket, so the graph cache key is stable across micro-batches
+// whose longest document differs. Guarantees s <= bucket(s) <= 2 * s, so the declared extent stays
+// within a factor of two of the real one. The bound is tight only at the floor, where bucket(1) is
+// 2; for every s > 1 the upper inequality is strict. That bound matters because the FP8 workspace grows with
+// the declared extent faster than linearly -- measured, not derived: 512 one-token documents cost
+// 0.09 GiB when described exactly and 32.15 GiB when described as 1024 tokens each.
+//
+// get_max_tokens is not usable here even though the buckets above 1024 are its own. It floors every
+// input from 1 through 1024 to 1024, which is right for a total token count and wrong for a
+// sequence extent that enters a quadratic workspace: describing 4096 one-token documents as 1024
+// tokens each requests 257 GiB and fails to allocate, where the exact shape needs almost nothing.
+// Below 1024 this rounds to a power of two instead, so a short document stays short.
+//
+// The floor of 2 is measured, not chosen: cuDNN reports "No valid execution plans" for a declared
+// extent of 1, and builds normally at 2. Checked at three geometries -- 32 heads with 8 GQA groups,
+// 16-head MHA, and 64 heads with 8 GQA groups, all head dim 128 with a padding-causal mask -- and
+// the floor did not move. Other geometries are not covered by that measurement; if one of them
+// needs a larger minimum it will surface as the same cuDNN error rather than as a wrong answer.
+//
+// Buckets at and above 1024 are unchanged from get_max_tokens, so packed rows of production size
+// land on exactly the buckets they did before.
+size_t fp8_thd_sequence_bucket(int64_t sequence_extent) {
+  NVTE_CHECK(sequence_extent > 0, "FP8 THD sequence extent must be positive, got ", sequence_extent,
+             ".");
+  constexpr size_t min_bucket = 2;
+  if (sequence_extent >= 1024) {
+    return get_max_tokens(static_cast<size_t>(sequence_extent));
+  }
+  size_t bucket = min_bucket;
+  while (bucket < static_cast<size_t>(sequence_extent)) {
+    bucket <<= 1;
+  }
+  return bucket;
+}
+
+}  // namespace
+
 // fused attention FWD FP8 with FE 1.0+
 void fused_attn_fp8_fwd_impl(
     int64_t b, int64_t h, int64_t hg, int64_t s_q, int64_t s_kv, int64_t d_qk, int64_t d_v,
@@ -67,6 +106,45 @@ void fused_attn_fp8_fwd_impl(
   const bool is_ragged = (nvte_get_qkv_format(qkv_layout) == NVTE_QKV_Format::NVTE_THD);
   NVTE_CHECK(!is_ragged || is_padding,
              "FP8 fused attention with THD requires a padding or padding_causal mask!");
+
+  // cu_seqlens carries [actual_b + 1] valid entries. b is not quantized (see below), so this is
+  // currently equal to b; the two are kept distinct because the conversion kernels take both and
+  // passing the real one is the correct call regardless.
+  //
+  // This is NOT by itself sufficient to introduce a batch capacity later. cu_seqlens_padded_to_
+  // offsets derives V offsets for the interleaved layouts by reading offsets_k[cu_seqlens_id]
+  // within the same kernel, so with tid > actual_b several threads would read the terminal
+  // offsets_k entry while the actual_b thread writes it. Unreachable while actual_b == b. Before
+  // raising b: add a conversion-kernel test with actual_b < max_b for every packed layout group,
+  // and remove or order that same-kernel read dependency.
+  const int64_t actual_b = b;
+  if (is_ragged) {
+    // Round the sequence extents up to buckets so the graph cache key is stable. Under THD, s_q and
+    // s_kv arrive as the longest document in the micro-batch, which changes nearly every call, and
+    // FADescriptor_v1 orders the cache on them -- so without this a fresh cuDNN graph is built
+    // almost every call. Rounding up is safe because both are declared upper bounds; the true
+    // per-document extents reach the kernel through cu_seqlens and the ragged offsets.
+    //
+    // Only the sequence extents, NOT the batch. The F16 ragged path also sets b = max_b and
+    // s = max_t (the bucketed *total* token count), which is safe for a flash-style kernel but not
+    // here: the FP8 workspace responds to both, and steeply. Measured on this fork -- adopting the
+    // F16 form took the production shape (one 16384-token row) from 1.76 GiB to 33.07 GiB per call,
+    // and made 129 documents request 257 GiB and fail to allocate. Bucketing the longest document
+    // and leaving b exact keeps production at 1.76 GiB while still collapsing the 1,408 distinct
+    // shape keys of a real training trace onto roughly 15.
+    NVTE_CHECK(actual_b > 0, "FP8 THD attention requires a positive batch size.");
+    const int64_t bucketed_s_q = static_cast<int64_t>(fp8_thd_sequence_bucket(s_q));
+    const int64_t bucketed_s_kv = static_cast<int64_t>(fp8_thd_sequence_bucket(s_kv));
+    NVTE_CHECK(bucketed_s_q >= s_q, "FP8 THD query bucket ", bucketed_s_q,
+               " is below the longest query sequence ", s_q, ".");
+    NVTE_CHECK(bucketed_s_kv >= s_kv, "FP8 THD key/value bucket ", bucketed_s_kv,
+               " is below the longest key/value sequence ", s_kv, ".");
+    s_q = bucketed_s_q;
+    s_kv = bucketed_s_kv;
+    bias_sq = s_q;
+    bias_skv = s_kv;
+  }
+
   // Match the F16 path: 64-bit wherever the runtime allows, rather than deriving the width from
   // problem size. See 06-audit-response.md, B5.
   const DType ragged_offset_type = cudnn_runtime_version >= 90500 ? DType::kInt64 : DType::kInt32;
@@ -432,12 +510,18 @@ void fused_attn_fp8_fwd_impl(
           dropout_offset, offset_q, offset_k, offset_v, offset_o,
           offset_stats] = get_graph(sdpa_fp8_fprop_cache, descriptor);
 
-    auto plan_workspace_size = mha_graph->get_workspace_size();
+    // Ragged input appends int64 ragged offsets after these buffers, so both the plan size and each
+    // sequence array have to be individually aligned or the offsets start misaligned. Non-ragged
+    // appends nothing after the pair and keeps its original layout exactly, so this change cannot
+    // move a byte on the BSHD, SBHD or BHSD paths.
+    const size_t plan_workspace_size =
+        is_ragged ? alignTo<16>(mha_graph->get_workspace_size()) : mha_graph->get_workspace_size();
 
     // Exit to request upper level API to allocate memory if needed.
-    // Each sub-allocation is padded to its own alignment: the ragged offsets are int64 on
-    // cuDNN >= 9.5, so the seqlen block must be aligned before they are appended.
-    size_t actual_seqlen_workspace_size = alignTo<16>(2 * b * sizeof(int32_t));
+    const size_t num_bytes_per_seqlen =
+        is_ragged ? alignTo<16>(b * sizeof(int32_t)) : b * sizeof(int32_t);
+    const size_t actual_seqlen_workspace_size =
+        is_ragged ? 2 * num_bytes_per_seqlen : alignTo<16>(2 * b * sizeof(int32_t));
     const size_t num_bytes_per_ragged_offset =
         alignTo<16>(((b + 1) * typeToNumBits(ragged_offset_type)) / 8);
     // Q, K, V, O, Stats
@@ -482,9 +566,13 @@ void fused_attn_fp8_fwd_impl(
       constexpr size_t nthreads_per_block = 128;
       const size_t grid = (b + nthreads_per_block - 1) / nthreads_per_block;
       void* devActualSeqlenQ = static_cast<int8_t*>(workspace) + plan_workspace_size;
-      void* devActualSeqlenKV = static_cast<int8_t*>(devActualSeqlenQ) + b * sizeof(int32_t);
+      void* devActualSeqlenKV = static_cast<int8_t*>(devActualSeqlenQ) + num_bytes_per_seqlen;
+      // (actual_b, b): read only the entries cu_seqlens actually has, and zero-fill any remainder
+      // out to the graph's batch dimension. b is not currently quantized, so the two are equal and
+      // the second argument is inert; passing both is what keeps this correct if a batch capacity
+      // is ever introduced, and it retires the TODO that stood here.
       cu_seqlens_to_actual_seqlens<<<grid, nthreads_per_block, 0, stream>>>(
-          b, b, static_cast<const int32_t*>(devPtrcuSeqlensQ),  // TODO(pass max_b)
+          actual_b, b, static_cast<const int32_t*>(devPtrcuSeqlensQ),
           static_cast<const int32_t*>(devPtrcuSeqlensKV), static_cast<int32_t*>(devActualSeqlenQ),
           static_cast<int32_t*>(devActualSeqlenKV));
       NVTE_CHECK_CUDA(cudaGetLastError());
@@ -496,6 +584,14 @@ void fused_attn_fp8_fwd_impl(
         // The multipliers are layout-specific (h*d for separate Q/K/V, 3*h*d for t3hd/th3d,
         // 2*h_kv*d for the KV-packed layouts, and h -- not h*d -- for Stats), which is exactly
         // what get_ragged_offset_multipliers encodes for the F16 path.
+        //
+        // This kernel writes b+1 entries, one more than the seqlen conversion above, so it needs
+        // its own launch extent -- (b + nthreads) / nthreads, matching
+        // fused_attn_f16_arbitrary_seqlen.cu:498. Sharing the seqlen grid leaves the terminal
+        // offset unwritten whenever b is an exact multiple of the block size, so a packed batch of
+        // exactly 128, 256 or 512 documents would address its last document from an uninitialised
+        // offset.
+        const size_t offsets_grid = (b + nthreads_per_block) / nthreads_per_block;
         int8_t* devOffsets = static_cast<int8_t*>(workspace) + plan_workspace_size +
                              actual_seqlen_workspace_size;
         void* devOffsetsQ = devOffsets;
@@ -508,8 +604,8 @@ void fused_attn_fp8_fwd_impl(
         // v1: no physical gaps, so cu_seqlens doubles as cu_seqlens_padded. The kernel derives
         // the per-tensor multipliers from layout_group/h/hg/d -- h*d for separate Q/K/V,
         // 3*h*d for t3hd/th3d, 2*hg*d for the KV-packed layouts, and h (not h*d) for Stats.
-        cu_seqlens_padded_to_offsets<<<grid, nthreads_per_block, 0, stream>>>(
-            layout_group, b, b, h, hg, d_qk, d_v,
+        cu_seqlens_padded_to_offsets<<<offsets_grid, nthreads_per_block, 0, stream>>>(
+            layout_group, actual_b, b, h, hg, d_qk, d_v,
             static_cast<const int32_t*>(devPtrcuSeqlensQ),
             static_cast<const int32_t*>(devPtrcuSeqlensKV), ragged_offset_type, devOffsetsQ,
             devOffsetsK, devOffsetsV, devOffsetsO, devOffsetsS);
@@ -607,6 +703,26 @@ void fused_attn_fp8_bwd_impl(
              "FP8 fused attention with THD requires a padding or padding_causal mask!");
   NVTE_CHECK(!is_ragged || nvte_get_qkv_format(dqkv_layout) == NVTE_QKV_Format::NVTE_THD,
              "FP8 fused attention with THD requires THD gradients (dqkv_layout must be THD)!");
+
+  // Same quantization as the forward, and it must agree with it: the backward keys its own graph
+  // cache on the same varying dimensions. See fused_attn_fp8_fwd_impl.
+  const int64_t actual_b = b;
+  if (is_ragged) {
+    // Must bucket identically to the forward: the two graphs key on the same dimensions, and the
+    // backward workspace responds to them the same way. See fused_attn_fp8_fwd_impl.
+    NVTE_CHECK(actual_b > 0, "FP8 THD attention requires a positive batch size.");
+    const int64_t bucketed_s_q = static_cast<int64_t>(fp8_thd_sequence_bucket(s_q));
+    const int64_t bucketed_s_kv = static_cast<int64_t>(fp8_thd_sequence_bucket(s_kv));
+    NVTE_CHECK(bucketed_s_q >= s_q, "FP8 THD query bucket ", bucketed_s_q,
+               " is below the longest query sequence ", s_q, ".");
+    NVTE_CHECK(bucketed_s_kv >= s_kv, "FP8 THD key/value bucket ", bucketed_s_kv,
+               " is below the longest key/value sequence ", s_kv, ".");
+    s_q = bucketed_s_q;
+    s_kv = bucketed_s_kv;
+    bias_sq = s_q;
+    bias_skv = s_kv;
+  }
+
   const DType ragged_offset_type = cudnn_runtime_version >= 90500 ? DType::kInt64 : DType::kInt32;
 
   try {
@@ -1156,14 +1272,17 @@ void fused_attn_fp8_bwd_impl(
           offset_do, offset_dq, offset_dk, offset_dv] =
         get_graph(sdpa_fp8_bprop_cache, descriptor);
 
-    auto plan_workspace_size = mha_graph->get_workspace_size();
+    // See fused_attn_fp8_fwd_impl. Ragged aligns the plan and each sequence array because int64
+    // ragged offsets follow them; non-ragged keeps its original layout, which had nothing after the
+    // sequence pair and so never needed the padding.
+    const size_t plan_workspace_size =
+        is_ragged ? alignTo<16>(mha_graph->get_workspace_size()) : mha_graph->get_workspace_size();
 
     // Exit to request upper level API to allocate memory if needed.
-    // NB: the seqlen block must be aligned before the ragged offsets are appended -- they are
-    // int64 on cuDNN >= 9.5, and 2*b*sizeof(int32_t) is only 8-byte aligned for odd b. The fprop
-    // has always used alignTo<16> here; the backward did not, because nothing followed it.
-    size_t actual_seqlen_workspace_size =
-        is_ragged ? alignTo<16>(2 * b * sizeof(int32_t)) : 2 * b * sizeof(int32_t);
+    const size_t num_bytes_per_seqlen =
+        is_ragged ? alignTo<16>(b * sizeof(int32_t)) : b * sizeof(int32_t);
+    const size_t actual_seqlen_workspace_size =
+        is_ragged ? 2 * num_bytes_per_seqlen : 2 * b * sizeof(int32_t);
     const size_t num_bytes_per_ragged_offset =
         alignTo<16>(((b + 1) * typeToNumBits(ragged_offset_type)) / 8);
     // Two sets of five: {Q,K,V,O,Stats} from qkv_layout and {dQ,dK,dV,dO,unused} from
@@ -1238,9 +1357,10 @@ void fused_attn_fp8_bwd_impl(
       constexpr size_t nthreads_per_block = 128;
       const size_t grid = (b + nthreads_per_block - 1) / nthreads_per_block;
       void* devActualSeqlenQ = static_cast<int8_t*>(workspace) + plan_workspace_size;
-      void* devActualSeqlenKV = static_cast<int8_t*>(devActualSeqlenQ) + b * sizeof(int32_t);
+      void* devActualSeqlenKV = static_cast<int8_t*>(devActualSeqlenQ) + num_bytes_per_seqlen;
+      // (actual_b, b): see fused_attn_fp8_fwd_impl.
       cu_seqlens_to_actual_seqlens<<<grid, nthreads_per_block, 0, stream>>>(
-          b, b, static_cast<const int32_t*>(devPtrcuSeqlensQ),  // TODO(pass max_b)
+          actual_b, b, static_cast<const int32_t*>(devPtrcuSeqlensQ),
           static_cast<const int32_t*>(devPtrcuSeqlensKV), static_cast<int32_t*>(devActualSeqlenQ),
           static_cast<int32_t*>(devActualSeqlenKV));
       NVTE_CHECK_CUDA(cudaGetLastError());
@@ -1251,6 +1371,9 @@ void fused_attn_fp8_bwd_impl(
         // Element offsets into the packed buffers: offsets_x[i] = mult_x * cu_seqlens[i]. The
         // kernel derives the multipliers from layout_group/h/hg/d -- h*d for separate Q/K/V,
         // 3*h*d for t3hd/th3d, 2*hg*d for the KV-packed layouts, and h (not h*d) for Stats.
+        //
+        // b+1 entries, so its own launch extent; see fused_attn_fp8_fwd_impl.
+        const size_t offsets_grid = (b + nthreads_per_block) / nthreads_per_block;
         int8_t* devOffsets = static_cast<int8_t*>(workspace) + plan_workspace_size +
                              actual_seqlen_workspace_size;
         auto slot = [&](size_t i) {
@@ -1271,8 +1394,8 @@ void fused_attn_fp8_bwd_impl(
         void* devOffsetsdS_unused = slot(9);
 
         // v1: no physical gaps, so cu_seqlens doubles as cu_seqlens_padded.
-        cu_seqlens_padded_to_offsets<<<grid, nthreads_per_block, 0, stream>>>(
-            nvte_get_qkv_layout_group(qkv_layout), b, b, h, hg, d_qk, d_v,
+        cu_seqlens_padded_to_offsets<<<offsets_grid, nthreads_per_block, 0, stream>>>(
+            nvte_get_qkv_layout_group(qkv_layout), actual_b, b, h, hg, d_qk, d_v,
             static_cast<const int32_t*>(devPtrcuSeqlensQ),
             static_cast<const int32_t*>(devPtrcuSeqlensKV), ragged_offset_type, devOffsetsQ,
             devOffsetsK, devOffsetsV, devOffsetsO, devOffsetsS);
@@ -1280,8 +1403,8 @@ void fused_attn_fp8_bwd_impl(
 
         // Second set, from dqkv_layout. Identical to the first when the layouts match; different
         // multipliers when they do not, which is the case this exists for.
-        cu_seqlens_padded_to_offsets<<<grid, nthreads_per_block, 0, stream>>>(
-            nvte_get_qkv_layout_group(dqkv_layout), b, b, h, hg, d_qk, d_v,
+        cu_seqlens_padded_to_offsets<<<offsets_grid, nthreads_per_block, 0, stream>>>(
+            nvte_get_qkv_layout_group(dqkv_layout), actual_b, b, h, hg, d_qk, d_v,
             static_cast<const int32_t*>(devPtrcuSeqlensQ),
             static_cast<const int32_t*>(devPtrcuSeqlensKV), ragged_offset_type, devOffsetsdQ,
             devOffsetsdK, devOffsetsdV, devOffsetsdO, devOffsetsdS_unused);
@@ -1329,9 +1452,8 @@ void fused_attn_fp8_fwd(
     NVTETensorPack* Aux_CTX_Tensors, const Tensor* cu_seqlens_q, const Tensor* cu_seqlens_kv,
     const Tensor* rng_state, Tensor* workspace, cudaStream_t stream, cudnnHandle_t handle) {
   using namespace transformer_engine;
-  // THD: Q is physically [t, h, d], so shape[0] is the total packed token count. The F16 path
-  // receives num_tokens_q/kv as explicit arguments (fused_attn_f16_arbitrary_seqlen.cu:1240);
-  // the FP8 signature does not, so derive them here rather than widening the public API.
+  // THD: Q is physically [t, h, d], so shape[0] is the total packed token count. Used below to
+  // size the ragged Stats tensor; the graph's sequence buckets are computed inside the impl.
   const bool is_ragged_fmt = (nvte_get_qkv_format(qkv_layout) == NVTE_QKV_Format::NVTE_THD);
   const size_t num_tokens_q = is_ragged_fmt ? input_Q->data.shape[0] : 0;
   void *devPtrQ = nullptr, *devPtrK = nullptr, *devPtrV = nullptr;
