@@ -22,15 +22,16 @@ namespace {
 // Round a THD sequence extent up to a bucket, so the graph cache key is stable across micro-batches
 // whose longest document differs. Guarantees s <= bucket(s) <= 2 * s, so the declared extent stays
 // within a factor of two of the real one. The bound is tight only at the floor, where bucket(1) is
-// 2; for every s > 1 the upper inequality is strict. That bound matters because the FP8 workspace grows with
-// the declared extent faster than linearly -- measured, not derived: 512 one-token documents cost
-// 0.09 GiB when described exactly and 32.15 GiB when described as 1024 tokens each.
+// 2; for every s > 1 the upper inequality is strict. The bound matters because the FP8 workspace is
+// sized from the declared extent, so every token declared beyond the real ones is paid for in
+// memory. No cost model is assumed here beyond that direction; the workspace tests bound it by
+// comparing measurements rather than by predicting them.
 //
-// get_max_tokens is not usable here even though the buckets above 1024 are its own. It floors every
-// input from 1 through 1024 to 1024, which is right for a total token count and wrong for a
-// sequence extent that enters a quadratic workspace: describing 4096 one-token documents as 1024
-// tokens each requests 257 GiB and fails to allocate, where the exact shape needs almost nothing.
-// Below 1024 this rounds to a power of two instead, so a short document stays short.
+// get_max_tokens is not usable here even though the buckets at and above 1024 are its own. It floors
+// every input from 1 through 1024 to 1024, which is right for a total token count and wrong for a
+// per-sequence extent: it describes a batch of one-token documents as 1024 tokens each, and the
+// resulting allocation can exceed device memory outright. Below 1024 this rounds to a power of two
+// instead, so a short document stays short.
 //
 // The floor of 2 is measured, not chosen: cuDNN reports "No valid execution plans" for a declared
 // extent of 1, and builds normally at 2. Checked at three geometries -- 32 heads with 8 GQA groups,
@@ -67,7 +68,7 @@ size_t fp8_thd_sequence_bucket(int64_t sequence_extent) {
 // cached bool; when enabled, a relaxed atomic increment measured at 6.2 ns against an attention
 // call of several milliseconds.
 //
-// Process-wide and atomic, NOT thread-local, even though the caches are. PyTorch runs backward on
+// Process-wide and atomic, not thread-local, even though the caches are. PyTorch runs backward on
 // an autograd worker thread, so thread-local counters are written there and read as zero from the
 // thread that ran the forward -- reporting "no backward graphs were ever built", which is exactly
 // the false reassurance this exists to prevent.
@@ -135,10 +136,10 @@ void fused_attn_fp8_fwd_impl(
   NVTE_CHECK(!is_mxfp8 || cudnn_runtime_version >= 92100,
              "MXFP8 fused attention requires cuDNN 9.21.0 or later!");
 
-  // THD (packed varlen). v1 handles the gap-free case only: cu_seqlens and cu_seqlens_padded
-  // coincide, so element offsets are built from the cu_seqlens this entry point already
-  // receives. Physical inter-sequence gaps need cu_seqlens_*_padded threaded through this
-  // signature -- that is v1.1 (06-implementation-plan.md, Phase G).
+  // THD (packed varlen), gap-free only: cu_seqlens and cu_seqlens_padded coincide, so element
+  // offsets are built from the cu_seqlens this entry point already receives. Physical
+  // inter-sequence gaps would need cu_seqlens_*_padded threaded through this signature, and are
+  // rejected in the python selector, which is the layer that knows about them.
   const bool is_ragged = (nvte_get_qkv_format(qkv_layout) == NVTE_QKV_Format::NVTE_THD);
   NVTE_CHECK(!is_ragged || is_padding,
              "FP8 fused attention with THD requires a padding or padding_causal mask!");
@@ -147,7 +148,7 @@ void fused_attn_fp8_fwd_impl(
   // currently equal to b; the two are kept distinct because the conversion kernels take both and
   // passing the real one is the correct call regardless.
   //
-  // This is NOT by itself sufficient to introduce a batch capacity later. cu_seqlens_padded_to_
+  // This is not by itself sufficient to introduce a batch capacity later. cu_seqlens_padded_to_
   // offsets derives V offsets for the interleaved layouts by reading offsets_k[cu_seqlens_id]
   // within the same kernel, so with tid > actual_b several threads would read the terminal
   // offsets_k entry while the actual_b thread writes it. Unreachable while actual_b == b. Before
@@ -157,17 +158,15 @@ void fused_attn_fp8_fwd_impl(
   if (is_ragged) {
     // Round the sequence extents up to buckets so the graph cache key is stable. Under THD, s_q and
     // s_kv arrive as the longest document in the micro-batch, which changes nearly every call, and
-    // FADescriptor_v1 orders the cache on them -- so without this a fresh cuDNN graph is built
-    // almost every call. Rounding up is safe because both are declared upper bounds; the true
+    // FADescriptor_v1 orders the cache on them, so without this a fresh cuDNN graph is built almost
+    // every call. Rounding up changes no result because both are declared upper bounds; the true
     // per-document extents reach the kernel through cu_seqlens and the ragged offsets.
     //
-    // Only the sequence extents, NOT the batch. The F16 ragged path also sets b = max_b and
-    // s = max_t (the bucketed *total* token count), which is safe for a flash-style kernel but not
-    // here: the FP8 workspace responds to both, and steeply. Measured on this fork -- adopting the
-    // F16 form took the production shape (one 16384-token row) from 1.76 GiB to 33.07 GiB per call,
-    // and made 129 documents request 257 GiB and fail to allocate. Bucketing the longest document
-    // and leaving b exact keeps production at 1.76 GiB while still collapsing the 1,408 distinct
-    // shape keys of a real training trace onto roughly 15.
+    // Only the sequence extents, not the batch. The F16 ragged path also replaces b with a bucketed
+    // capacity, which costs a flash-style kernel nothing, but the FP8 workspace is sized from the
+    // declared batch as well as the declared extent -- so declaring a capacity rather than the true
+    // document count multiplies it. Leaving b exact keeps the workspace proportional to the tokens
+    // actually present.
     NVTE_CHECK(actual_b > 0, "FP8 THD attention requires a positive batch size.");
     const int64_t bucketed_s_q = static_cast<int64_t>(fp8_thd_sequence_bucket(s_q));
     const int64_t bucketed_s_kv = static_cast<int64_t>(fp8_thd_sequence_bucket(s_kv));
@@ -182,7 +181,7 @@ void fused_attn_fp8_fwd_impl(
   }
 
   // Match the F16 path: 64-bit wherever the runtime allows, rather than deriving the width from
-  // problem size. See 06-audit-response.md, B5.
+  // problem size.
   const DType ragged_offset_type = cudnn_runtime_version >= 90500 ? DType::kInt64 : DType::kInt32;
 
   try {
@@ -260,10 +259,12 @@ void fused_attn_fp8_fwd_impl(
     // Get plan from cache if cache is available, otherwise create one
     auto get_graph = [&](CacheType& cache, const FADescriptor_v1& descriptor) -> graph_and_tensors {
       // if hit, return
-      if (fp8_cache_stats_enabled()) fp8_cache_stats.fprop_lookups.fetch_add(1, std::memory_order_relaxed);
+      if (fp8_cache_stats_enabled())
+        fp8_cache_stats.fprop_lookups.fetch_add(1, std::memory_order_relaxed);
       auto it = cache.find(descriptor);
       if (it != cache.end()) {
-        if (fp8_cache_stats_enabled()) fp8_cache_stats.fprop_hits.fetch_add(1, std::memory_order_relaxed);
+        if (fp8_cache_stats_enabled())
+          fp8_cache_stats.fprop_hits.fetch_add(1, std::memory_order_relaxed);
         auto graph = it->second;
         return graph;
       }
@@ -493,7 +494,7 @@ void fused_attn_fp8_fwd_impl(
           .set_stride(is_ragged ? std::vector<int64_t>{h * s_q, 1, h, 1}
                                 : std::vector<int64_t>{h * s_q, s_q, 1, 1});
       if (is_ragged) {
-        // NB: the Stats ragged-offset multiplier is h, not h*d -- Stats is one value per
+        // The Stats ragged-offset multiplier is h, not h*d -- Stats is one value per
         // (token, head). Getting this wrong is invisible in the forward output but corrupts the
         // backward, which consumes Stats as LSE.
         Stats->set_ragged_offset(offset_stats);
@@ -525,10 +526,9 @@ void fused_attn_fp8_fwd_impl(
           is_padding ? std::make_tuple(seq_q, seq_kv) : std::make_tuple(nullptr, nullptr);
       auto dropout_tuple = is_dropout ? std::make_tuple(dropout_seed, dropout_offset)
                                       : std::make_tuple(nullptr, nullptr);
-      auto ragged_tuple = is_ragged
-                              ? std::make_tuple(offset_q, offset_k, offset_v, offset_o,
-                                                offset_stats)
-                              : std::make_tuple(nullptr, nullptr, nullptr, nullptr, nullptr);
+      auto ragged_tuple =
+          is_ragged ? std::make_tuple(offset_q, offset_k, offset_v, offset_o, offset_stats)
+                    : std::make_tuple(nullptr, nullptr, nullptr, nullptr, nullptr);
 
       NVTE_CHECK_CUDNN_FE(mha_graph->validate());
       NVTE_CHECK_CUDNN_FE(mha_graph->build_operation_graph(handle));
@@ -539,15 +539,16 @@ void fused_attn_fp8_fwd_impl(
           std::tuple_cat(std::make_tuple(mha_graph), key_tensors_tuple, Stats_tuple, bias_tuple,
                          softmax_offset_tuple, padding_tuple, dropout_tuple, ragged_tuple);
       cache.insert({descriptor, return_tuple});
-      if (fp8_cache_stats_enabled()) fp8_cache_stats.fprop_entries.store(cache.size(), std::memory_order_relaxed);
+      if (fp8_cache_stats_enabled())
+        fp8_cache_stats.fprop_entries.store(cache.size(), std::memory_order_relaxed);
 
       return return_tuple;
     };
 
     auto [mha_graph, Q, K, V, descale_q, descale_k, descale_v, descale_s, scale_s, scale_o,
           attn_scale, O, amax_s, amax_o, Stats, bias, softmax_offset, seq_q, seq_kv, dropout_seed,
-          dropout_offset, offset_q, offset_k, offset_v, offset_o,
-          offset_stats] = get_graph(sdpa_fp8_fprop_cache, descriptor);
+          dropout_offset, offset_q, offset_k, offset_v, offset_o, offset_stats] =
+        get_graph(sdpa_fp8_fprop_cache, descriptor);
 
     // Ragged input appends int64 ragged offsets after these buffers, so both the plan size and each
     // sequence array have to be individually aligned or the offsets start misaligned. Non-ragged
@@ -607,9 +608,9 @@ void fused_attn_fp8_fwd_impl(
       void* devActualSeqlenQ = static_cast<int8_t*>(workspace) + plan_workspace_size;
       void* devActualSeqlenKV = static_cast<int8_t*>(devActualSeqlenQ) + num_bytes_per_seqlen;
       // (actual_b, b): read only the entries cu_seqlens actually has, and zero-fill any remainder
-      // out to the graph's batch dimension. b is not currently quantized, so the two are equal and
-      // the second argument is inert; passing both is what keeps this correct if a batch capacity
-      // is ever introduced, and it retires the TODO that stood here.
+      // out to the graph's batch dimension. b is not currently bucketed, so the two are equal and
+      // the second argument has no effect today; passing both keeps this correct if a batch
+      // capacity is ever introduced.
       cu_seqlens_to_actual_seqlens<<<grid, nthreads_per_block, 0, stream>>>(
           actual_b, b, static_cast<const int32_t*>(devPtrcuSeqlensQ),
           static_cast<const int32_t*>(devPtrcuSeqlensKV), static_cast<int32_t*>(devActualSeqlenQ),
@@ -631,8 +632,8 @@ void fused_attn_fp8_fwd_impl(
         // exactly 128, 256 or 512 documents would address its last document from an uninitialised
         // offset.
         const size_t offsets_grid = (b + nthreads_per_block) / nthreads_per_block;
-        int8_t* devOffsets = static_cast<int8_t*>(workspace) + plan_workspace_size +
-                             actual_seqlen_workspace_size;
+        int8_t* devOffsets =
+            static_cast<int8_t*>(workspace) + plan_workspace_size + actual_seqlen_workspace_size;
         void* devOffsetsQ = devOffsets;
         void* devOffsetsK = devOffsets + num_bytes_per_ragged_offset;
         void* devOffsetsV = devOffsets + 2 * num_bytes_per_ragged_offset;
@@ -728,11 +729,11 @@ void fused_attn_fp8_bwd_impl(
   bool is_O_in_F16 = (o_tensor_type == cudnn_frontend::DataType_t::HALF ||
                       o_tensor_type == cudnn_frontend::DataType_t::BFLOAT16);
 
-  // THD (packed varlen), mirroring fused_attn_fp8_fwd_impl. v1 is the gap-free case only:
-  // cu_seqlens doubles as cu_seqlens_padded, so element offsets come from the cu_seqlens this
-  // entry point already receives. Physical gaps are v1.1 (Phase G).
+  // THD (packed varlen), mirroring fused_attn_fp8_fwd_impl. Gap-free only: cu_seqlens doubles as
+  // cu_seqlens_padded, so element offsets come from the cu_seqlens this entry point already
+  // receives.
   //
-  // The backward needs two *sets* of offsets, not one. Reads (Q/K/V/O/Stats) are addressed by
+  // The backward needs two sets of offsets, not one. Reads (Q/K/V/O/Stats) are addressed by
   // qkv_layout; writes (dQ/dK/dV) by dqkv_layout. Those layouts can differ -- a t3hd forward can
   // produce separate thd gradients -- and the multipliers differ with them (3*h*d vs h*d). When
   // they happen to match, the second set is identical and costs one extra launch plus five small
@@ -864,10 +865,12 @@ void fused_attn_fp8_bwd_impl(
     // Get plan from cache if cache is available, otherwise create one
     auto get_graph = [&](CacheType& cache, const FADescriptor_v1& descriptor) -> graph_and_tensors {
       // if hit, return
-      if (fp8_cache_stats_enabled()) fp8_cache_stats.bprop_lookups.fetch_add(1, std::memory_order_relaxed);
+      if (fp8_cache_stats_enabled())
+        fp8_cache_stats.bprop_lookups.fetch_add(1, std::memory_order_relaxed);
       auto it = cache.find(descriptor);
       if (it != cache.end()) {
-        if (fp8_cache_stats_enabled()) fp8_cache_stats.bprop_hits.fetch_add(1, std::memory_order_relaxed);
+        if (fp8_cache_stats_enabled())
+          fp8_cache_stats.bprop_hits.fetch_add(1, std::memory_order_relaxed);
         auto graph = it->second;
         return graph;
       }
@@ -927,14 +930,15 @@ void fused_attn_fp8_bwd_impl(
                                  .set_dim({b, h, s_q, d_v})
                                  .set_stride(dO_strides)
                                  .set_data_type(do_tensor_type));
-      Stats = mha_graph->tensor(fe::graph::Tensor_attributes()
-                                    .set_name("Stats")
-                                    .set_dim({b, h, s_q, 1})
-                                    // Packed Stats is [t, h, 1], so the sequence axis strides by
-                                    // h and the head axis by 1 -- the transpose of the dense case.
-                                    .set_stride(is_ragged ? std::vector<int64_t>{h * s_q, 1, h, 1}
-                                                          : std::vector<int64_t>{h * s_q, s_q, 1, 1})
-                                    .set_data_type(fe::DataType_t::FLOAT));
+      Stats =
+          mha_graph->tensor(fe::graph::Tensor_attributes()
+                                .set_name("Stats")
+                                .set_dim({b, h, s_q, 1})
+                                // Packed Stats is [t, h, 1], so the sequence axis strides by
+                                // h and the head axis by 1 -- the transpose of the dense case.
+                                .set_stride(is_ragged ? std::vector<int64_t>{h * s_q, 1, h, 1}
+                                                      : std::vector<int64_t>{h * s_q, s_q, 1, 1})
+                                .set_data_type(fe::DataType_t::FLOAT));
       // THD: dense {b,h,s,d} dims with BSHD-style strides, plus a per-batch ragged offset that
       // displaces each sequence's base pointer into the packed buffer. The Stats multiplier is
       // h, not h*d -- Stats holds one value per (token, head), not per element.
@@ -1302,7 +1306,8 @@ void fused_attn_fp8_bwd_impl(
                                          mxfp8_tensors_tuple, bias_tuple, softmax_offset_tuple,
                                          padding_tuple, dropout_tuple, ragged_tuple);
       cache.insert({descriptor, return_tuple});
-      if (fp8_cache_stats_enabled()) fp8_cache_stats.bprop_entries.store(cache.size(), std::memory_order_relaxed);
+      if (fp8_cache_stats_enabled())
+        fp8_cache_stats.bprop_entries.store(cache.size(), std::memory_order_relaxed);
 
       return return_tuple;
     };
@@ -1311,8 +1316,7 @@ void fused_attn_fp8_bwd_impl(
           dK, dV, amax_dQ, amax_dK, amax_dV, amax_dP, Q_t, K_t, dO_f16, dO_t, descale_q_t,
           descale_k_t, descale_dO_t, bias, dBias, softmax_offset, d_softmax_offset, seq_q, seq_kv,
           dropout_seed, dropout_offset, offset_q, offset_k, offset_v, offset_o, offset_stats,
-          offset_do, offset_dq, offset_dk, offset_dv] =
-        get_graph(sdpa_fp8_bprop_cache, descriptor);
+          offset_do, offset_dq, offset_dk, offset_dv] = get_graph(sdpa_fp8_bprop_cache, descriptor);
 
     // See fused_attn_fp8_fwd_impl. Ragged aligns the plan and each sequence array because int64
     // ragged offsets follow them; non-ragged keeps its original layout, which had nothing after the
@@ -1416,8 +1420,8 @@ void fused_attn_fp8_bwd_impl(
         //
         // b+1 entries, so its own launch extent; see fused_attn_fp8_fwd_impl.
         const size_t offsets_grid = (b + nthreads_per_block) / nthreads_per_block;
-        int8_t* devOffsets = static_cast<int8_t*>(workspace) + plan_workspace_size +
-                             actual_seqlen_workspace_size;
+        int8_t* devOffsets =
+            static_cast<int8_t*>(workspace) + plan_workspace_size + actual_seqlen_workspace_size;
         auto slot = [&](size_t i) {
           return static_cast<void*>(devOffsets + i * num_bytes_per_ragged_offset);
         };
@@ -1737,7 +1741,7 @@ void fused_attn_fp8_bwd(
 }  // namespace transformer_engine
 
 NVTEFusedAttnFP8CacheStats nvte_get_fused_attn_fp8_cache_stats() {
-  const auto &counters = transformer_engine::fused_attn::fp8_cache_stats;
+  const auto& counters = transformer_engine::fused_attn::fp8_cache_stats;
   return {transformer_engine::fused_attn::fp8_cache_stats_enabled() ? 1 : 0,
           counters.fprop_lookups.load(std::memory_order_relaxed),
           counters.fprop_hits.load(std::memory_order_relaxed),
@@ -1748,8 +1752,8 @@ NVTEFusedAttnFP8CacheStats nvte_get_fused_attn_fp8_cache_stats() {
 }
 
 void nvte_reset_fused_attn_fp8_cache_stats() {
-  auto &counters = transformer_engine::fused_attn::fp8_cache_stats;
-  for (auto *counter : {&counters.fprop_lookups, &counters.fprop_hits, &counters.fprop_entries,
+  auto& counters = transformer_engine::fused_attn::fp8_cache_stats;
+  for (auto* counter : {&counters.fprop_lookups, &counters.fprop_hits, &counters.fprop_entries,
                         &counters.bprop_lookups, &counters.bprop_hits, &counters.bprop_entries}) {
     counter->store(0, std::memory_order_relaxed);
   }

@@ -504,7 +504,7 @@ namespace {
 
 // Multiply in a width that cannot wrap, and saturate rather than overflow. The inputs here are
 // products of head count, head dim and token count; a pathological config could otherwise wrap
-// int64 and produce a *small* max_offset, which would answer "int32 is fine" for the very case
+// int64 and produce a small max_offset, which would answer "int32 is fine" for the very case
 // the check exists to reject.
 int64_t checked_mul(int64_t a, int64_t b) {
   constexpr int64_t kMax = std::numeric_limits<int64_t>::max();
@@ -520,7 +520,7 @@ int64_t checked_mul(int64_t a, int64_t b, int64_t c) { return checked_mul(checke
 DType get_ragged_offset_dtype(NVTE_QKV_Layout_Group layout_group, int64_t num_attn_heads,
                               int64_t num_gqa_groups, int64_t tokens_q, int64_t tokens_kv,
                               int64_t head_dim_qk, int64_t head_dim_v) {
-  // NB: `tokens_q`/`tokens_kv` are physical token counts (t = sum of seqlens), not max_seqlen.
+  // `tokens_q`/`tokens_kv` are physical token counts (t = sum of seqlens), not max_seqlen.
   // The offsets are mult * cu_seqlens_padded[i], whose maximum is mult * t. Sizing from
   // max_seqlen underestimates by roughly the batch size -- see the header for the contract.
   std::array<int64_t, 4> offsets_qkvo{};

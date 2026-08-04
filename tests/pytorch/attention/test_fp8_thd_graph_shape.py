@@ -7,11 +7,10 @@ rounds `s_q` and `s_kv` up to buckets before the descriptor is built, and leaves
 document count.
 
 Only the sequence extents. The F16 ragged path also replaces the batch with a bucketed capacity;
-doing the same here is measured to be far more expensive, because the FP8 workspace responds to both
-the declared batch and the declared extent where the flash-style F16 graph is insensitive to the
-over-description. Measured on this fork: the F16 form took the production shape from 1.76 to 33.07
-GiB per call and made 129 documents request 257 GiB and fail to allocate. No closed-form cost model
-is claimed -- an earlier `max_b * max_t^2 * 4` formula fitted two points and did not generalise.
+the FP8 workspace is sized from the declared batch as well as the declared extent, where the
+flash-style F16 graph is insensitive to the over-description, so declaring a batch capacity here
+multiplies the workspace. No closed-form cost model is assumed; the workspace assertions below are
+ratios between measurements.
 
 The bucket policy is therefore local to FP8: powers of two with a floor of 2 below 1024, and the
 shared token buckets at and above 1024, bounding every extent at `s <= bucket(s) <= 2 * s`. The
@@ -29,7 +28,7 @@ These tests pin the properties that make the rounding safe, none of which are ti
   - results are unchanged across the bucket boundaries the rounding introduces;
   - every document, including the last, is addressed correctly in both the forward and the backward
     at document counts that are exact multiples of the conversion block size;
-  - short documents do not inflate the quadratic workspace, which a floored bucket would;
+  - short documents do not inflate the workspace, which a floored bucket would;
   - the FP8 THD zero fill performs no device-to-host read.
 
 Throughput is not asserted here. These are correctness, safety and resource properties; the cache
@@ -76,20 +75,29 @@ TOKEN_COUNTS = (1023, 1024, 1025, 2048, 2049)
 
 def attention(mask: str = "padding_causal") -> te.DotProductAttention:
     return te.DotProductAttention(
-        num_attention_heads=CONFIG.num_heads, kv_channels=CONFIG.head_dim_qk,
-        num_gqa_groups=CONFIG.num_gqa_groups, attention_dropout=0.0,
-        qkv_format="thd", attn_mask_type=mask,
+        num_attention_heads=CONFIG.num_heads,
+        kv_channels=CONFIG.head_dim_qk,
+        num_gqa_groups=CONFIG.num_gqa_groups,
+        attention_dropout=0.0,
+        qkv_format="thd",
+        attn_mask_type=mask,
         softmax_scale=1.0 / math.sqrt(CONFIG.head_dim_qk),
     ).cuda()
 
 
-def run(batch, module, fp8: bool = True, max_seqlen: int | None = None,
-        fast_zero_fill: bool = True) -> dict[str, torch.Tensor]:
+def run(
+    batch, module, fp8: bool = True, max_seqlen: int | None = None, fast_zero_fill: bool = True
+) -> dict[str, torch.Tensor]:
     """One forward and backward; returns the output and the three input gradients."""
     q, k, v = (t.detach().clone().requires_grad_(True) for t in (batch.q, batch.k, batch.v))
     bound = batch.max_seqlen if max_seqlen is None else max_seqlen
-    kwargs = dict(cu_seqlens_q=batch.cu_seqlens, cu_seqlens_kv=batch.cu_seqlens,
-                  max_seqlen_q=bound, max_seqlen_kv=bound, fast_zero_fill=fast_zero_fill)
+    kwargs = dict(
+        cu_seqlens_q=batch.cu_seqlens,
+        cu_seqlens_kv=batch.cu_seqlens,
+        max_seqlen_q=bound,
+        max_seqlen_kv=bound,
+        fast_zero_fill=fast_zero_fill,
+    )
     if fp8:
         with te.fp8_autocast(enabled=True, fp8_recipe=recipe.DelayedScaling(fp8_dpa=True)):
             out = module(q, k, v, **kwargs)
@@ -132,11 +140,11 @@ def test_padded_sequence_bound_is_inert(documents):
     for name in TENSORS:
         assert torch.equal(true_bound[name], control[name]), (
             f"{name}: two identical calls disagree, so bit-exactness is not a meaningful floor "
-            f"here and this test cannot distinguish the bound's effect from run-to-run noise"
+            "here and this test cannot distinguish the bound's effect from run-to-run noise"
         )
         assert torch.equal(true_bound[name], padded[name]), (
             f"{name}: declaring max_seqlen={2 * batch.max_seqlen} instead of {batch.max_seqlen} "
-            f"changed the result; the bound is not an upper bound in practice"
+            "changed the result; the bound is not an upper bound in practice"
         )
 
 
@@ -155,11 +163,11 @@ def compare_per_document(batch, fp8, bf16, names):
             where = f"{name}, document {index} of {batch.batch_size}"
             assert cosine > 0.99, (
                 f"{where}: cosine {cosine:.4f} against the BF16 reference; the packed base pointer "
-                f"for this document is wrong"
+                "for this document is wrong"
             )
-            assert 0.9 < norm_ratio < 1.1, (
-                f"{where}: norm ratio {norm_ratio:.4f} against the BF16 reference"
-            )
+            assert (
+                0.9 < norm_ratio < 1.1
+            ), f"{where}: norm ratio {norm_ratio:.4f} against the BF16 reference"
 
 
 @pytest.mark.parametrize("documents", DOCUMENT_COUNTS)
@@ -260,11 +268,9 @@ def test_the_synchronization_detector_fires():
 
 # --------------------------------------------------------------------------------------
 # Workspace. The declared sequence extent is a resource decision, not only a correctness one, and
-# nothing else in this suite would notice a bucket policy that inflates it. The first version of
-# this fix quantized the batch as well and passed every correctness test while taking the production
-# shape from 1.76 to 33.07 GiB per call; a later one floored short sequences to 1024 and turned
-# 4,096 one-token documents into a 257 GiB request. Both were found by measuring, not by asserting.
-# The assertions below are ratios between measurements and assume no cost model.
+# nothing else in this suite would notice a bucket policy that inflates it: a policy can be correct
+# on every value and still request orders of magnitude more memory than it needs. The assertions
+# below are ratios between measurements and assume no cost model.
 # --------------------------------------------------------------------------------------
 
 _PEAK_WORKLOAD = textwrap.dedent(
@@ -305,8 +311,12 @@ def peak_gib(documents: int, per_document: int, timeout: int = 900) -> float:
     Isolated because a failure here is an out-of-memory error, which leaves the caching allocator
     in a state that perturbs every later measurement in the same process.
     """
-    proc = subprocess.run([sys.executable, "-c", _PEAK_WORKLOAD, str(documents), str(per_document)],
-                          capture_output=True, text=True, timeout=timeout)
+    proc = subprocess.run(
+        [sys.executable, "-c", _PEAK_WORKLOAD, str(documents), str(per_document)],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
     line = next((l for l in proc.stdout.splitlines() if l.startswith("peak-gib")), None)
     assert line is not None, (
         f"{documents} documents of {per_document} tokens did not complete:\n"
@@ -328,16 +338,17 @@ def require_idle_device(fraction: float = 0.5):
     torch.cuda.empty_cache()
     free, total = torch.cuda.mem_get_info()
     if free < fraction * total:
-        pytest.skip(f"device has {free / 2**30:.1f} GiB free of {total / 2**30:.1f} GiB; "
-                    f"peak-memory assertions need a substantially idle device")
+        pytest.skip(
+            f"device has {free / 2**30:.1f} GiB free of {total / 2**30:.1f} GiB; "
+            "peak-memory assertions need a substantially idle device"
+        )
 
 
 def test_one_token_documents_do_not_inflate_the_workspace():
     """One-token documents cost far less than the same count of 64-token ones.
 
     A bucket policy that floors short sequences describes every one-token document as a floor-sized
-    sequence, and the quadratic term makes that enormous: at a floor of 1,024 these two cases cost
-    exactly the same.
+    sequence, so at a floor of 1,024 these two cases declare the same extent and cost the same.
 
     The assertion is a ratio between two measurements, so it carries no absolute memory constant and
     holds on any device large enough to run the reference.
@@ -347,18 +358,18 @@ def test_one_token_documents_do_not_inflate_the_workspace():
     reference = peak_gib(512, 64)
     assert short < reference / 4, (
         f"512 one-token documents peaked at {short:.3f} GiB against {reference:.3f} GiB for the "
-        f"same count at 64 tokens. The declared sequence extent is not tracking the actual one, "
-        f"which is what a floored bucket does"
+        "same count at 64 tokens. The declared sequence extent is not tracking the actual one, "
+        "which is what a floored bucket does"
     )
 
 
 def test_many_one_token_documents_stay_linear_in_document_count():
     """4,096 one-token documents complete, and cost about eight times 512 of them.
 
-    This is the case that failed outright before the bucket floor was fixed: at a floor of 1,024 it
-    requested 257 GiB and could not allocate. Completing at all is most of the assertion. The
-    linearity bound then says the growth came from the document count and not from the sequence
-    extent, and both measurements are well under a gigabyte, so this needs almost no free memory.
+    A bucket floor that rounds a one-token document up to a large extent makes this allocation fail
+    outright, so completing at all is most of the assertion. The linearity bound then says the
+    growth came from the document count and not from the sequence extent. Both measurements are
+    well under a gigabyte, so this needs almost no free memory.
     """
     require_idle_device()
     small = peak_gib(512, 1)
@@ -367,7 +378,7 @@ def test_many_one_token_documents_stay_linear_in_document_count():
     assert ratio < 12.0, (
         f"4,096 one-token documents peaked at {large:.3f} GiB against {small:.3f} GiB for 512 of "
         f"them, a ratio of {ratio:.1f} for an eightfold document count. Growth that is faster than "
-        f"linear means the sequence extent is being inflated as well"
+        "linear means the sequence extent is being inflated as well"
     )
 
 
@@ -425,12 +436,18 @@ def cache_stats(rows: list[list[int]], timeout: int = 900) -> dict:
     as "no graphs were built" rather than "nothing was counted".
     """
     env = dict(os.environ, **{CACHE_STATS: "1"})
-    proc = subprocess.run([sys.executable, "-c", _CACHE_WORKLOAD, json.dumps(rows)],
-                          capture_output=True, text=True, timeout=timeout, env=env)
+    proc = subprocess.run(
+        [sys.executable, "-c", _CACHE_WORKLOAD, json.dumps(rows)],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env=env,
+    )
     line = next((l for l in proc.stdout.splitlines() if l.startswith("stats ")), None)
-    assert line is not None, (
-        f"workload did not complete:\n{proc.stdout[-2000:]}\n{proc.stderr[-2000:]}")
-    return json.loads(line[len("stats "):])
+    assert (
+        line is not None
+    ), f"workload did not complete:\n{proc.stdout[-2000:]}\n{proc.stderr[-2000:]}"
+    return json.loads(line[len("stats ") :])
 
 
 # Longest documents 1100 through 2000: ten distinct values, all inside the 2048 bucket.
@@ -451,15 +468,15 @@ def test_distinct_shapes_in_one_bucket_share_one_graph():
     assert stats["enabled"], "counter collection is off, so every count below would be a vacuous 0"
     assert stats["fprop_entries"] == 1, (
         f"ten distinct longest-document values built {stats['fprop_entries']} forward graphs; "
-        f"they all fall in the 2048 bucket and should share one"
+        "they all fall in the 2048 bucket and should share one"
     )
-    assert stats["bprop_entries"] == 1, (
-        f"{stats['bprop_entries']} backward graphs for the same ten rows"
-    )
+    assert (
+        stats["bprop_entries"] == 1
+    ), f"{stats['bprop_entries']} backward graphs for the same ten rows"
     # Without this the entry assertions would also pass if attention never ran at all.
-    assert stats["fprop_hits"] > 0 and stats["bprop_hits"] > 0, (
-        f"no cache hits recorded, so the counters are not observing a live cache: {stats}"
-    )
+    assert (
+        stats["fprop_hits"] > 0 and stats["bprop_hits"] > 0
+    ), f"no cache hits recorded, so the counters are not observing a live cache: {stats}"
 
 
 def test_crossing_a_bucket_builds_another_graph():
@@ -476,9 +493,9 @@ def test_crossing_a_bucket_builds_another_graph():
         f"three rows in three different buckets built {stats['fprop_entries']} forward graphs, "
         f"expected {len(THREE_BUCKET_ROWS)}; the counter does not track graph creation"
     )
-    assert stats["bprop_entries"] == len(THREE_BUCKET_ROWS), (
-        f"{stats['bprop_entries']} backward graphs, expected {len(THREE_BUCKET_ROWS)}"
-    )
+    assert stats["bprop_entries"] == len(
+        THREE_BUCKET_ROWS
+    ), f"{stats['bprop_entries']} backward graphs, expected {len(THREE_BUCKET_ROWS)}"
 
 
 def test_cache_counters_are_off_by_default():
@@ -490,12 +507,15 @@ def test_cache_counters_are_off_by_default():
     require_idle_device()
     proc = subprocess.run(
         [sys.executable, "-c", _CACHE_WORKLOAD, json.dumps(THREE_BUCKET_ROWS)],
-        capture_output=True, text=True, timeout=900,
-        env={k: v for k, v in os.environ.items() if k != CACHE_STATS})
+        capture_output=True,
+        text=True,
+        timeout=900,
+        env={k: v for k, v in os.environ.items() if k != CACHE_STATS},
+    )
     line = next((l for l in proc.stdout.splitlines() if l.startswith("stats ")), None)
     assert line is not None, f"workload did not complete:\n{proc.stderr[-2000:]}"
-    stats = json.loads(line[len("stats "):])
+    stats = json.loads(line[len("stats ") :])
     assert not stats["enabled"], "counters report enabled without the flag set"
-    assert stats["fprop_lookups"] == 0 and stats["bprop_lookups"] == 0, (
-        f"counters collected without the flag set: {stats}"
-    )
+    assert (
+        stats["fprop_lookups"] == 0 and stats["bprop_lookups"] == 0
+    ), f"counters collected without the flag set: {stats}"

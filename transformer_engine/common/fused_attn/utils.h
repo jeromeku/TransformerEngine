@@ -348,7 +348,7 @@ __global__ void cu_seqlens_padded_to_offsets(NVTE_QKV_Layout_Group layout_group,
 /*! \brief Width needed for THD ragged offsets: int32 if every offset fits, else int64.
  *
  * The offsets this sizes are `mult * cu_seqlens_padded[i]`, so the largest one scales with the
- * **total packed token count** `t = sum(seqlens)` -- NOT with `max_seqlen`. Passing `max_seqlen`
+ * total packed token count `t = sum(seqlens)`, not with `max_seqlen`. Passing `max_seqlen`
  * underestimates by roughly a factor of the batch size and can answer int32 for a batch whose
  * offsets overflow int32.
  *

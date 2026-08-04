@@ -655,13 +655,13 @@ void nvte_multi_tensor_pad_last_dim(NVTETensor *inputs, NVTETensor *outputs, siz
  *  sum; with one forward thread and one autograd thread each count is exact for its own cache.
  */
 typedef struct {
-  int enabled;           /*!< nonzero when NVTE_FP8_ATTN_CACHE_STATS is set; all counts are 0 if not */
-  size_t fprop_lookups;  /*!< forward cache queries */
-  size_t fprop_hits;     /*!< forward queries served from the cache; misses are lookups - hits */
-  size_t fprop_entries;  /*!< distinct graphs held by the forward cache */
-  size_t bprop_lookups;  /*!< backward cache queries */
-  size_t bprop_hits;     /*!< backward queries served from the cache */
-  size_t bprop_entries;  /*!< distinct graphs held by the backward cache */
+  int enabled; /*!< nonzero when NVTE_FP8_ATTN_CACHE_STATS is set; all counts are 0 if not */
+  size_t fprop_lookups; /*!< forward cache queries */
+  size_t fprop_hits;    /*!< forward queries served from the cache; misses are lookups - hits */
+  size_t fprop_entries; /*!< distinct graphs held by the forward cache */
+  size_t bprop_lookups; /*!< backward cache queries */
+  size_t bprop_hits;    /*!< backward queries served from the cache */
+  size_t bprop_entries; /*!< distinct graphs held by the backward cache */
 } NVTEFusedAttnFP8CacheStats;
 
 /*! \brief Read the FP8 fused-attention graph cache counters for the calling thread. */

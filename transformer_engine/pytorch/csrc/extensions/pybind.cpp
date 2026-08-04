@@ -347,8 +347,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("reset_fused_attn_fp8_cache_stats",
         &transformer_engine::pytorch::reset_fused_attn_fp8_cache_stats,
         "Zero the FP8 fused-attention graph cache counters for this thread");
-  m.def("get_ragged_offset_dtype_bits",
-        &transformer_engine::pytorch::get_ragged_offset_dtype_bits,
+  m.def("get_ragged_offset_dtype_bits", &transformer_engine::pytorch::get_ragged_offset_dtype_bits,
         "Bit width (32 or 64) required for THD ragged offsets, from physical token counts",
         py::call_guard<py::gil_scoped_release>());
   m.def("compute_amax", &transformer_engine::pytorch::compute_amax,

@@ -897,7 +897,7 @@ def get_attention_backend(
             # threaded with cu_seqlens_*_padded, so a physical gap between sequences would be
             # addressed as if it were not there and silently read a neighbour's tokens. This has
             # to be rejected here rather than in nvte_get_fused_attn_backend, which is never told
-            # about pad_between_seqs. Supporting gaps is v1.1; see 06-implementation-plan.md.
+            # about pad_between_seqs.
             if fp8 and fp8_meta["recipe"].fp8_dpa:
                 if use_fused_attention:
                     logger.debug(

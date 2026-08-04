@@ -32,10 +32,9 @@ void mha_fill(const transformer_engine::TensorWrapper &self) {
   std::vector<size_t> shape = transformer_engine::pytorch::convertShape(self.shape());
 
   auto max_tokens = shape[0];
-  // NB: the bound was `i <= shape.size()`, which read one element past the end of the vector
-  // and multiplied the garbage into fcd_size (observed: rank-3 [640,4,128] gave 164352 instead
-  // of 512, having picked up shape[3]=321). size_t rather than int, so the product cannot
-  // overflow on large packed batches.
+  // The bound is `i < shape.size()`: `i <= shape.size()` reads one element past the end of the
+  // vector and multiplies the garbage into fcd_size. size_t rather than int, so the product
+  // cannot overflow on large packed batches.
   size_t fcd_size = 1;
   for (size_t i = 1; i < shape.size(); i++) {
     fcd_size *= shape[i];

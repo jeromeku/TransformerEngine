@@ -179,7 +179,7 @@ _dpa_fp8ds_reduce_amax = os.getenv("NVTE_DPA_FP8DS_REDUCE_AMAX", "1") == "1"
 # Opt-in content validation for packed (THD) sequence metadata: NVTE_THD_VALIDATE_METADATA=1.
 #
 # The unconditional checks in the THD branch below cover rank, dtype and shape -- all host-side
-# and free. Nothing checks the *values*, and cu_seqlens is handed to the kernels as a trusted
+# and cost nothing. Nothing checks the values, and cu_seqlens is handed to the kernels as a
 # device pointer from which every ragged offset is derived. Measured behaviour without this:
 #
 #   non-monotonic offsets  -> runs to completion, returns finite garbage
@@ -194,14 +194,16 @@ _thd_validate_metadata = os.getenv("NVTE_THD_VALIDATE_METADATA", "0") == "1"
 
 
 def _check_cu_seqlens(cu_seqlens: torch.Tensor, total_tokens: int, name: str) -> None:
-    """Validate the *contents* of a cumulative sequence-length tensor.
+    """Validate the contents of a cumulative sequence-length tensor.
 
     Raises ValueError with the offending values rather than letting a bad offset reach the
     kernel, where it either corrupts a neighbouring sequence silently or faults opaquely.
     """
     host = cu_seqlens.detach().to("cpu", torch.int64)
     if host.numel() < 2:
-        raise ValueError(f"{name} must have at least 2 entries (batch_size + 1), got {host.numel()}")
+        raise ValueError(
+            f"{name} must have at least 2 entries (batch_size + 1), got {host.numel()}"
+        )
     if host[0].item() != 0:
         raise ValueError(
             f"{name}[0] must be 0, got {host[0].item()}. A nonzero first offset shifts every"
@@ -1382,7 +1384,7 @@ class DotProductAttention(TransformerEngineBaseModule):
                 if _thd_validate_metadata:
                     _check_cu_seqlens(cu_seqlens_q, query_layer.shape[0], "cu_seqlens_q")
                     _check_cu_seqlens(cu_seqlens_kv, key_layer.shape[0], "cu_seqlens_kv")
-                    # The padded variants describe the *physical* extents, so their final entry is
+                    # The padded variants describe the physical extents, so their final entry is
                     # the buffer length rather than the token count; same bound, still <= t.
                     if cu_seqlens_q_padded is not None:
                         _check_cu_seqlens(
