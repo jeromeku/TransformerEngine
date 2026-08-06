@@ -26,7 +26,9 @@ from transformer_engine.common.recipe import (
     MXFP8BlockScaling,
     Format,
 )
-from transformer_engine.pytorch.attention.dot_product_attention.utils import FlashAttentionUtils
+from transformer_engine.pytorch.attention.dot_product_attention.utils import (
+    FlashAttentionUtils,
+)
 
 _current_file = pathlib.Path(__file__).resolve()
 sys.path.append(str(_current_file.parent.parent))
@@ -51,18 +53,30 @@ model_configs_flash_attn = {
     # test: ModelConfig(b, sq, hq, dqk)
     "cp_1_0": ModelConfig(2, 4096, 12, 128, attn_mask_type="causal"),  # MHA
     "cp_1_1": ModelConfig(2, 4096, 12, 128),  # MHA
-    "cp_1_2": ModelConfig(2, 4096, 12, 128, attn_mask_type="causal", window_size=(512, 0)),  # MHA
+    "cp_1_2": ModelConfig(
+        2, 4096, 12, 128, attn_mask_type="causal", window_size=(512, 0)
+    ),  # MHA
     "cp_1_3": ModelConfig(2, 4096, 12, 128, window_size=(512, 512)),  # MHA
-    "cp_2_0": ModelConfig(2, 4096, 32, 128, num_gqa_groups=4, attn_mask_type="causal"),  # GQA
+    "cp_2_0": ModelConfig(
+        2, 4096, 32, 128, num_gqa_groups=4, attn_mask_type="causal"
+    ),  # GQA
     "cp_2_1": ModelConfig(2, 4096, 12, 128, num_gqa_groups=2),  # GQA
-    "cp_2_2": ModelConfig(2, 4096, 32, 128, attn_mask_type="causal", window_size=(128, 0)),  # GQA
-    "cp_2_3": ModelConfig(2, 4096, 12, 128, num_gqa_groups=2, window_size=(512, 512)),  # GQA
-    "cp_3_0": ModelConfig(2, 4096, 128, 192, attn_mask_type="causal", head_dim_v=128),  # MLA
+    "cp_2_2": ModelConfig(
+        2, 4096, 32, 128, attn_mask_type="causal", window_size=(128, 0)
+    ),  # GQA
+    "cp_2_3": ModelConfig(
+        2, 4096, 12, 128, num_gqa_groups=2, window_size=(512, 512)
+    ),  # GQA
+    "cp_3_0": ModelConfig(
+        2, 4096, 128, 192, attn_mask_type="causal", head_dim_v=128
+    ),  # MLA
     "cp_3_1": ModelConfig(2, 4096, 12, 192, head_dim_v=128),  # MLA
     "cp_3_2": ModelConfig(
         2, 4096, 12, 192, attn_mask_type="causal", window_size=(512, 0), head_dim_v=128
     ),  # MLA
-    "cp_3_3": ModelConfig(2, 4096, 12, 192, window_size=(512, 512), head_dim_v=128),  # MLA
+    "cp_3_3": ModelConfig(
+        2, 4096, 12, 192, window_size=(512, 512), head_dim_v=128
+    ),  # MLA
 }
 
 
@@ -102,7 +116,9 @@ class PoolWorker:
 
     def _spawn(self) -> None:
         te_path = os.getenv("TE_PATH", "/opt/transformerengine")
-        worker = os.path.join(te_path, "tests/pytorch/attention/run_attention_with_cp_pool.py")
+        worker = os.path.join(
+            te_path, "tests/pytorch/attention/run_attention_with_cp_pool.py"
+        )
         cmd = [
             sys.executable,
             "-m",
@@ -273,7 +289,9 @@ def cp_pool():
 
     def _get(world_size: int) -> PoolWorker:
         if world_size > torch.cuda.device_count():
-            pytest.skip(f"Test requires {world_size} GPUs, but found {torch.cuda.device_count()}")
+            pytest.skip(
+                f"Test requires {world_size} GPUs, but found {torch.cuda.device_count()}"
+            )
         if world_size not in pools:
             pools[world_size] = PoolWorker(world_size)
         return pools[world_size]
@@ -300,24 +318,37 @@ if test_essential:
     qkv_formats = ["sbhd", "thd"]
 
 
-@pytest.mark.skipif(not FlashAttentionUtils.v2_plus, reason="Flash-attn 2.0+ is required.")
-@pytest.mark.skipif(get_device_compute_capability() < (8, 0), reason="CP tests require sm80+.")
+@pytest.mark.skipif(
+    not FlashAttentionUtils.v2_plus, reason="Flash-attn 2.0+ is required."
+)
+@pytest.mark.skipif(
+    get_device_compute_capability() < (8, 0), reason="CP tests require sm80+."
+)
 @pytest.mark.parametrize("dtype", dtypes)
 @pytest.mark.parametrize("model", model_configs_flash_attn.keys())
 @pytest.mark.parametrize("qkv_format", qkv_formats)
 @pytest.mark.parametrize("cp_comm_type", cp_comm_types)
 @pytest.mark.parametrize("pad_between_seqs", [False, True])
-def test_cp_with_flash_attention(cp_pool, dtype, model, qkv_format, cp_comm_type, pad_between_seqs):
+def test_cp_with_flash_attention(
+    cp_pool, dtype, model, qkv_format, cp_comm_type, pad_between_seqs
+):
     num_gpus = 4 if cp_comm_type == "a2a+p2p" else 2
     pool = cp_pool(num_gpus)
 
     if pad_between_seqs:
         if qkv_format != "thd":
             pytest.skip("pad_between_seqs only applies to THD format!")
-        if not FlashAttentionUtils.v3_is_installed or get_device_compute_capability() > (9, 0):
-            pytest.skip("pad_between_seqs with CP requires Flash Attention v3 on Hopper (sm90)!")
+        if (
+            not FlashAttentionUtils.v3_is_installed
+            or get_device_compute_capability() > (9, 0)
+        ):
+            pytest.skip(
+                "pad_between_seqs with CP requires Flash Attention v3 on Hopper (sm90)!"
+            )
         if cp_comm_type == "a2a+p2p":
-            pytest.skip("pad_between_seqs is not yet supported with A2A+P2P CP comm type!")
+            pytest.skip(
+                "pad_between_seqs is not yet supported with A2A+P2P CP comm type!"
+            )
 
     config = model_configs_flash_attn[model]
     config.context_parallel = True
@@ -325,11 +356,17 @@ def test_cp_with_flash_attention(cp_pool, dtype, model, qkv_format, cp_comm_type
 
     if config.attn_bias_type != "no_bias" and qkv_format == "thd":
         pytest.skip("No support for bias with THD format!")
-    if config.attn_bias_type != "no_bias" and cp_comm_type in ["all_gather", "a2a", "a2a+p2p"]:
+    if config.attn_bias_type != "no_bias" and cp_comm_type in [
+        "all_gather",
+        "a2a",
+        "a2a+p2p",
+    ]:
         pytest.skip("No support for bias with cp_comm_type={all_gather, a2a, a2a+p2p}!")
 
     if qkv_format == "thd" and cp_comm_type in ["all_gather", "a2a+p2p"]:
-        pytest.skip("No support for THD format with cp_comm_type={all_gather, a2a+p2p}!")
+        pytest.skip(
+            "No support for THD format with cp_comm_type={all_gather, a2a+p2p}!"
+        )
 
     if (
         config.window_size != (-1, 0)
@@ -377,7 +414,9 @@ def test_cp_with_flash_attention(cp_pool, dtype, model, qkv_format, cp_comm_type
 
 model_configs_fused_attn = {
     # test: ModelConfig(b, sq, hq, dqk)
-    "cp_1_0": ModelConfig(2, 4096, 12, 128, attn_mask_type="causal", return_max_logit=True),  # MHA
+    "cp_1_0": ModelConfig(
+        2, 4096, 12, 128, attn_mask_type="causal", return_max_logit=True
+    ),  # MHA
     "cp_1_1": ModelConfig(2, 4096, 12, 128, return_max_logit=True),  # MHA
     "cp_1_2": ModelConfig(
         2, 4096, 12, 128, attn_mask_type="causal", attn_bias_type="post_scale_bias"
@@ -386,7 +425,9 @@ model_configs_fused_attn = {
     "cp_1_4": ModelConfig(
         2, 4096, 12, 128, attn_bias_type="post_scale_bias", bias_shape="bhss"
     ),  # MHA
-    "cp_1_5": ModelConfig(2, 4096, 12, 128, attn_mask_type="causal", window_size=(512, 512)),  # MHA
+    "cp_1_5": ModelConfig(
+        2, 4096, 12, 128, attn_mask_type="causal", window_size=(512, 512)
+    ),  # MHA
     "cp_2_0": ModelConfig(
         2,
         4096,
@@ -437,28 +478,76 @@ model_configs_fused_attn = {
         2, 4096, 12, 128, num_gqa_groups=2, attn_bias_type="post_scale_bias"
     ),  # GQA
     "cp_2_6": ModelConfig(
-        2, 4096, 12, 128, num_gqa_groups=2, attn_mask_type="causal", window_size=(512, 512)
+        2,
+        4096,
+        12,
+        128,
+        num_gqa_groups=2,
+        attn_mask_type="causal",
+        window_size=(512, 512),
     ),  # GQA
-    "cp_3_0": ModelConfig(2, 4096, 12, 128, attn_mask_type="causal", head_dim_v=64),  # MLA
-    "cp_3_1": ModelConfig(2, 4096, 128, 192, head_dim_v=128, attn_mask_type="causal"),  # MLA
-    "cp_3_2": ModelConfig(
-        2, 4096, 12, 128, attn_mask_type="causal", attn_bias_type="post_scale_bias", head_dim_v=64
+    "cp_3_0": ModelConfig(
+        2, 4096, 12, 128, attn_mask_type="causal", head_dim_v=64
     ),  # MLA
-    "cp_3_3": ModelConfig(2, 4096, 12, 128, attn_bias_type="post_scale_bias", head_dim_v=64),  # MLA
+    "cp_3_1": ModelConfig(
+        2, 4096, 128, 192, head_dim_v=128, attn_mask_type="causal"
+    ),  # MLA
+    "cp_3_2": ModelConfig(
+        2,
+        4096,
+        12,
+        128,
+        attn_mask_type="causal",
+        attn_bias_type="post_scale_bias",
+        head_dim_v=64,
+    ),  # MLA
+    "cp_3_3": ModelConfig(
+        2, 4096, 12, 128, attn_bias_type="post_scale_bias", head_dim_v=64
+    ),  # MLA
     "cp_3_4": ModelConfig(
-        2, 4096, 12, 128, attn_bias_type="post_scale_bias", bias_shape="b1ss", head_dim_v=64
+        2,
+        4096,
+        12,
+        128,
+        attn_bias_type="post_scale_bias",
+        bias_shape="b1ss",
+        head_dim_v=64,
     ),  # MLA
     "cp_4_0": ModelConfig(
-        2, 4096, 64, 64, num_gqa_groups=8, attn_mask_type="causal", softmax_type="vanilla"
+        2,
+        4096,
+        64,
+        64,
+        num_gqa_groups=8,
+        attn_mask_type="causal",
+        softmax_type="vanilla",
     ),  # GQA
     "cp_4_1": ModelConfig(
-        2, 4096, 64, 64, num_gqa_groups=8, attn_mask_type="causal", softmax_type="off-by-one"
+        2,
+        4096,
+        64,
+        64,
+        num_gqa_groups=8,
+        attn_mask_type="causal",
+        softmax_type="off-by-one",
     ),  # GQA
     "cp_4_2": ModelConfig(
-        2, 4096, 64, 64, num_gqa_groups=8, attn_mask_type="causal", softmax_type="learnable"
+        2,
+        4096,
+        64,
+        64,
+        num_gqa_groups=8,
+        attn_mask_type="causal",
+        softmax_type="learnable",
     ),  # GQA
     "cp_4_3": ModelConfig(
-        2, 4096, 64, 64, attn_mask_type="causal", window_size=(128, 0), softmax_type="learnable"
+        2,
+        4096,
+        64,
+        64,
+        attn_mask_type="causal",
+        window_size=(128, 0),
+        softmax_type="learnable",
     ),  # GQA
     # The two layer types of a packed hybrid SWA model, as one row each: GQA 36:6 at head_dim 128,
     # which is the shape the 8b/15b configs run. Every ingredient below already has a row above, but
@@ -484,6 +573,47 @@ model_configs_fused_attn = {
         num_gqa_groups=6,
         attn_mask_type="causal",
     ),  # GQA, global-attention layer, vanilla softmax (p2p)
+    # The rest of the attention-variant matrix the scaling arms sweep, {SWA, global} x {vanilla,
+    # off-by-one, learnable}, at the same shape. A sink constrains the comm type -- it is a2a-only --
+    # so these exist to prove every variant the 8b/15b configs can select survives packed CP, not
+    # just the two that ship today.
+    "cp_5_2": ModelConfig(
+        2,
+        4096,
+        36,
+        128,
+        num_gqa_groups=6,
+        attn_mask_type="causal",
+        window_size=(4096, 0),
+    ),  # GQA, sliding window, vanilla softmax
+    "cp_5_3": ModelConfig(
+        2,
+        4096,
+        36,
+        128,
+        num_gqa_groups=6,
+        attn_mask_type="causal",
+        window_size=(4096, 0),
+        softmax_type="off-by-one",
+    ),  # GQA, sliding window, fixed sink
+    "cp_5_4": ModelConfig(
+        2,
+        4096,
+        36,
+        128,
+        num_gqa_groups=6,
+        attn_mask_type="causal",
+        softmax_type="off-by-one",
+    ),  # GQA, global attention, fixed sink
+    "cp_5_5": ModelConfig(
+        2,
+        4096,
+        36,
+        128,
+        num_gqa_groups=6,
+        attn_mask_type="causal",
+        softmax_type="learnable",
+    ),  # GQA, global attention, learnable sink
 }
 
 
@@ -504,6 +634,10 @@ if test_essential:
         "cp_4_3",
         "cp_5_0",
         "cp_5_1",
+        "cp_5_2",
+        "cp_5_3",
+        "cp_5_4",
+        "cp_5_5",
     ]
     model_configs_fused_attn = {k: model_configs_fused_attn[k] for k in configs}
     dtypes = ["bf16", "fp8"]
@@ -511,7 +645,9 @@ if test_essential:
 
 
 @pytest.mark.skipif(get_cudnn_version() < (8, 9, 7), reason="cuDNN 8.9.7+ is required.")
-@pytest.mark.skipif(get_device_compute_capability() < (8, 0), reason="CP tests require sm80+.")
+@pytest.mark.skipif(
+    get_device_compute_capability() < (8, 0), reason="CP tests require sm80+."
+)
 @pytest.mark.parametrize("dtype", dtypes)
 @pytest.mark.parametrize("model", model_configs_fused_attn.keys())
 @pytest.mark.parametrize("qkv_format", qkv_formats)
@@ -561,13 +697,21 @@ def test_cp_with_fused_attention(
 
     if config.attn_bias_type != "no_bias" and qkv_format == "thd":
         pytest.skip("No support for bias with THD format!")
-    if config.attn_bias_type != "no_bias" and cp_comm_type in ["all_gather", "a2a", "a2a+p2p"]:
+    if config.attn_bias_type != "no_bias" and cp_comm_type in [
+        "all_gather",
+        "a2a",
+        "a2a+p2p",
+    ]:
         pytest.skip("No support for bias with cp_comm_type={all_gather, a2a, a2a+p2p}!")
 
     if qkv_format == "thd" and cp_comm_type in ["all_gather", "a2a+p2p"]:
-        pytest.skip("No support for THD format with cp_comm_type={all_gather, a2a+p2p}!")
+        pytest.skip(
+            "No support for THD format with cp_comm_type={all_gather, a2a+p2p}!"
+        )
 
-    if (config.window_size[0] != -1 or config.window_size[1] not in [-1, 0]) and cp_comm_type in [
+    if (
+        config.window_size[0] != -1 or config.window_size[1] not in [-1, 0]
+    ) and cp_comm_type in [
         "p2p",
         "a2a+p2p",
     ]:
@@ -582,13 +726,17 @@ def test_cp_with_fused_attention(
         )
 
     if config.softmax_type != "vanilla" and cp_comm_type != "a2a":
-        pytest.skip(f"No support for non-vanilla softmax with cp_comm_type={cp_comm_type}!")
+        pytest.skip(
+            f"No support for non-vanilla softmax with cp_comm_type={cp_comm_type}!"
+        )
     if (
         config.softmax_type != "vanilla"
         and qkv_format == "thd"
         and get_cudnn_version() < (9, 18, 0)
     ):
-        pytest.skip("No support for non-vanilla softmax with THD format and cuDNN < 9.18.0!")
+        pytest.skip(
+            "No support for non-vanilla softmax with THD format and cuDNN < 9.18.0!"
+        )
 
     if dtype == "fp8" and scaling_mode is None:
         pytest.skip("dtype=fp8 requires scaling_mode != None!")
@@ -662,9 +810,13 @@ def test_cp_with_fused_attention(
         pytest.skip("No attention backend available.")
 
     if _deterministic and config.softmax_type != "vanilla":
-        pytest.skip("Deterministic mode does not support non-vanilla softmax with FusedAttention")
+        pytest.skip(
+            "Deterministic mode does not support non-vanilla softmax with FusedAttention"
+        )
     if _deterministic and config.attn_bias_type == "post_scale_bias" and is_training:
-        pytest.skip("Deterministic mode does not support post_scale_bias with requires_grad")
+        pytest.skip(
+            "Deterministic mode does not support post_scale_bias with requires_grad"
+        )
     # Observed: cuDNN det THD backward asks for ~128 * bHSS bytes of workspace
     # on sm90; at 1<<30 that's 128 GiB, won't fit on H100's 80 GB. Held exactly
     # at b=2 + power-of-2 S in our sweep; for b>=3 the workspace was observed to
@@ -675,7 +827,10 @@ def test_cp_with_fused_attention(
         _deterministic
         and qkv_format == "thd"
         and get_device_compute_capability() == (9, 0)
-        and config.batch_size * config.num_heads * config.max_seqlen_q * config.max_seqlen_kv
+        and config.batch_size
+        * config.num_heads
+        * config.max_seqlen_q
+        * config.max_seqlen_kv
         >= SM90_DET_FUSED_THD_BWD_MAX_BHSS
     ):
         pytest.skip(
