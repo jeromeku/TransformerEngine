@@ -460,6 +460,30 @@ model_configs_fused_attn = {
     "cp_4_3": ModelConfig(
         2, 4096, 64, 64, attn_mask_type="causal", window_size=(128, 0), softmax_type="learnable"
     ),  # GQA
+    # The two layer types of a packed hybrid SWA model, as one row each: GQA 36:6 at head_dim 128,
+    # which is the shape the 8b/15b configs run. Every ingredient below already has a row above, but
+    # this combination -- padded THD *and* a sliding window *and* a sink *and* GQA -- does not, and
+    # that is the composition a packed context-parallel training run depends on. Declared "causal":
+    # the runner promotes it to padding_causal under qkv_format="thd" and pads between documents
+    # itself for FusedAttention, so asking for padding_causal here is rejected.
+    "cp_5_0": ModelConfig(
+        2,
+        4096,
+        36,
+        128,
+        num_gqa_groups=6,
+        attn_mask_type="causal",
+        window_size=(4096, 0),
+        softmax_type="learnable",
+    ),  # GQA, sliding-window layer with a learnable sink (a2a only)
+    "cp_5_1": ModelConfig(
+        2,
+        4096,
+        36,
+        128,
+        num_gqa_groups=6,
+        attn_mask_type="causal",
+    ),  # GQA, global-attention layer, vanilla softmax (p2p)
 }
 
 
@@ -478,6 +502,8 @@ if test_essential:
         "cp_3_4",
         "cp_4_2",
         "cp_4_3",
+        "cp_5_0",
+        "cp_5_1",
     ]
     model_configs_fused_attn = {k: model_configs_fused_attn[k] for k in configs}
     dtypes = ["bf16", "fp8"]
