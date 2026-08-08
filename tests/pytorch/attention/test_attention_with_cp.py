@@ -891,3 +891,78 @@ def test_cp_with_fused_attention(
         deterministic=_deterministic,
         log_level=pytest_logging_level,
     )
+
+
+# --------------------------------------------------------------------------------------
+# a2a GQA-aware KV-head replication (raises the a2a CP ceiling above 2 for GQA models)
+# --------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "num_q_heads,num_kv_heads,cp_size,expected",
+    [
+        (36, 6, 2, 1),  # 8b, already divisible
+        (36, 6, 4, 2),  # 8b at CP=4: 6 not divisible by 4 -> replicate x2 -> 12
+        (36, 6, 8, 1),  # 8b at CP=8: no factor divides fanout 6 with (f*6)%8==0 -> 1 (assert fires)
+        (40, 10, 2, 1),  # 15b, already divisible
+        (40, 10, 4, 2),  # 15b at CP=4: 10 -> x2 -> 20
+        (40, 10, 8, 4),  # 15b at CP=8: 10 -> x4 -> 40
+        (16, 16, 4, 1),  # MHA, already divisible
+        (16, 3, 4, 1),  # fanout 16/3 non-integer -> not clean GQA -> 1
+    ],
+)
+def test_a2a_kv_head_replication_factor_table(num_q_heads, num_kv_heads, cp_size, expected):
+    """Pin the structured replication factor. Mirrors radical's _smallest_kv_replication_factor;
+    the two must agree (radical's own suite pins its copy). A factor that stops dividing the GQA
+    fanout, or stops making (f*num_kv_heads) divisible by cp_size, breaks the a2a head split."""
+    from transformer_engine.pytorch.attention.dot_product_attention.context_parallel import (
+        get_a2a_kv_head_replication_factor,
+    )
+
+    got = get_a2a_kv_head_replication_factor(num_q_heads, num_kv_heads, cp_size)
+    assert got == expected, (
+        f"factor({num_q_heads}, {num_kv_heads}, {cp_size}) = {got}, expected {expected}"
+    )
+    if got > 1:
+        assert num_q_heads % num_kv_heads == 0 and (num_q_heads // num_kv_heads) % got == 0, (
+            "factor must divide the GQA fanout to keep an integer Q:KV ratio"
+        )
+        assert (got * num_kv_heads) % cp_size == 0, "replicated KV heads must be cp_size-divisible"
+
+
+@pytest.mark.skipif(get_cudnn_version() < (8, 9, 7), reason="cuDNN 8.9.7+ is required.")
+@pytest.mark.skipif(get_device_compute_capability() < (9, 0), reason="THD requires sm90+.")
+@pytest.mark.parametrize("model", ["cp_5_1", "cp_5_7", "cp_5_0", "cp_5_6"])
+def test_a2a_kv_head_replication_cp4(cp_pool, model):
+    """a2a at CP=4 for GQA models whose KV-head count is not divisible by 4 (8b 36:6, 15b 40:10).
+
+    Without KV replication the a2a head split asserts (6 % 4 != 0, 10 % 4 != 0); with it, each KV
+    head is replicated x2 to reach an integer per-rank count. run_dpa_with_cp compares the CP forward
+    AND every input gradient against a single-GPU reference, so this exercises the correctness-
+    critical backward reduction: a dK/dV too small by the replication factor fails the dk/dv
+    assert_close. Shown able to fail by disabling the reduction (see PHASE2 worklog). BF16 only;
+    cp_5_1/cp_5_7 are global-vanilla, cp_5_0/cp_5_6 add a sliding window + learnable sink to prove
+    replication composes with them. 8b caps at CP=4 (36 % 8 != 0 is a Q-side limit).
+    """
+    if torch.cuda.device_count() < 4:
+        pytest.skip("CP=4 requires 4 GPUs")
+    config = model_configs_fused_attn[model]
+    if config.num_heads % 4 != 0:
+        pytest.skip(f"{model}: num_heads {config.num_heads} not divisible by CP=4")
+    pool = cp_pool(4)
+    _submit(
+        pool,
+        dtype="bf16",
+        model=model,
+        qkv_format="thd",
+        kernel_backend="FusedAttention",
+        cp_comm_type="a2a",
+        fp8_bwd=False,
+        fp8_dpa=False,
+        fp8_mha=False,
+        scaling_mode=None,
+        f16_O=True,
+        is_training=True,
+        deterministic=False,
+        log_level=pytest_logging_level,
+    )

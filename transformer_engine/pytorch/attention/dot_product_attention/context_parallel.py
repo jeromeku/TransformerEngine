@@ -3874,6 +3874,33 @@ class AttnFuncWithCPAndKVAllGather(torch.autograd.Function):
         )
 
 
+def get_a2a_kv_head_replication_factor(num_q_heads, num_kv_heads, cp_size):
+    """Smallest structured KV-head replication factor for a2a, or 1 when none is needed/possible.
+
+    a2a shards the head dimension across cp ranks, so it needs num_kv_heads % cp_size == 0. When a
+    GQA config has fewer (or an indivisible number of) KV heads -- e.g. 6 KV groups at cp_size=4 --
+    replicate each KV head ``f`` times so ``(f*num_kv_heads) % cp_size == 0``. ``f`` is chosen to
+    divide the GQA fanout (num_q_heads // num_kv_heads) so the per-rank Q:KV ratio stays an integer;
+    this is structured replication, NOT padding KV up to a multiple of cp_size (which would leave a
+    fractional ratio the kernel rejects). Mirrors ``_smallest_kv_replication_factor`` in radical's
+    ``cp_utils.py`` (cross-checked equal in test_a2a_kv_replication.py); duplicated here because TE
+    cannot import radical.
+
+    Returns 1 when: already divisible; not a clean GQA config (num_q_heads % num_kv_heads != 0); or
+    no factor works (e.g. 36 heads at cp_size=8) -- in the last case the caller's num_heads % cp_size
+    assert then fires with its original message.
+    """
+    if num_kv_heads == 0 or num_q_heads % num_kv_heads != 0:
+        return 1
+    if num_kv_heads % cp_size == 0:
+        return 1
+    fanout = num_q_heads // num_kv_heads
+    for f in range(1, fanout + 1):
+        if fanout % f == 0 and (f * num_kv_heads) % cp_size == 0:
+            return f
+    return 1
+
+
 class AttnFuncWithCPAndQKVOA2A(torch.autograd.Function):
     """
     Attention implementation with context parallelism. Like Ulysses, applying A2A to QKVO.
@@ -3922,6 +3949,26 @@ class AttnFuncWithCPAndQKVOA2A(torch.autograd.Function):
         original_qkv_layout = qkv_layout
         orig_q_shape, orig_k_shape, orig_v_shape = q.shape, k.shape, v.shape
         orig_o_shape = orig_q_shape[:-1] + orig_v_shape[-1:]
+
+        # Structured GQA-aware KV-head replication: a2a shards heads across cp ranks and so needs
+        # num_kv_heads % cp_size == 0. When it is not (e.g. 6 KV groups at cp_size=4), replicate each
+        # KV head f times so the head-scatter a2a below has an integer per-rank KV count, with f
+        # dividing the GQA fanout to keep an integer Q:KV ratio. repeat_interleave lays the replicas
+        # out contiguously ([h0,h0,h1,h1,...]) so the per-rank contiguous head split preserves the
+        # Q->KV mapping. f==1 leaves the divisible case byte-for-byte unchanged. dK/dV are summed
+        # back over the f replicas in backward -- omitting that sum makes them too small by f,
+        # silently (forward parity does not catch it); see test_a2a_kv_replication.py. orig_k/v_shape
+        # above are the pre-replication shapes, which backward reduces dK/dV back to.
+        kv_replication_factor = get_a2a_kv_head_replication_factor(q.shape[-2], k.shape[-2], cp_size)
+        if kv_replication_factor > 1:
+            assert not fp8, (
+                "a2a KV-head replication is not yet supported for FP8 (BF16 only for now); "
+                f"got num_kv_heads={k.shape[-2]}, cp_size={cp_size} needing factor "
+                f"{kv_replication_factor}"
+            )
+            k = k.repeat_interleave(kv_replication_factor, dim=-2)
+            v = v.repeat_interleave(kv_replication_factor, dim=-2)
+
         o_format = qkv_format
         _, seq_dim_qkv, _ = get_bsh_dims(qkv_format)
         _, seq_dim_o, _ = get_bsh_dims(o_format)
@@ -4238,6 +4285,7 @@ class AttnFuncWithCPAndQKVOA2A(torch.autograd.Function):
         ctx.orig_k_shape = orig_k_shape
         ctx.orig_v_shape = orig_v_shape
         ctx.orig_o_shape = orig_o_shape
+        ctx.kv_replication_factor = kv_replication_factor
 
         # save tensors for backward
         ctx.fp8 = is_bwd_fp8
@@ -4553,6 +4601,17 @@ class AttnFuncWithCPAndQKVOA2A(torch.autograd.Function):
             cu_seqlens_kv_padded=cu_seqlens_kv_padded,
             a2a_input_names=["dq", "dk", "dv"],
         )
+        # Undo the forward KV-head replication: each original KV head was replicated f times
+        # contiguously along the head axis, so its gradient is the sum over those f replicas. Skip
+        # this and dK/dV are silently too small by f -- a same-precision forward-parity check passes
+        # while training is wrong. Reduces dK/dV from [.., f*num_kv, d] back to orig_k/v_shape
+        # ([.., num_kv, d]). dQ is not replicated. f==1 is a no-op. (BF16 only: the forward asserts
+        # fp8 is not combined with f>1, so dK/dV here are float, not quantized _data.)
+        f = ctx.kv_replication_factor
+        if f > 1:
+            num_kv_k, num_kv_v = ctx.orig_k_shape[-2], ctx.orig_v_shape[-2]
+            dk = dk.reshape(*dk.shape[:-2], num_kv_k, f, dk.shape[-1]).sum(dim=-2)
+            dv = dv.reshape(*dv.shape[:-2], num_kv_v, f, dv.shape[-1]).sum(dim=-2)
         dq, dk, dv = [
             x.view(y)
             for x, y in zip([dq, dk, dv], [ctx.orig_q_shape, ctx.orig_k_shape, ctx.orig_v_shape])
