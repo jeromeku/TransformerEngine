@@ -816,7 +816,8 @@ void nvte_fused_attn_bwd(const NVTETensor Q, const NVTETensor K, const NVTETenso
                        input_Q, input_K, input_V, input_O, input_dO, input_dO_f16, input_M, input_S,
                        input_SoftmaxOffset, input_output_dP, output_dQ, output_dK, output_dV,
                        output_dSoftmaxOffset, input_cu_seqlens_q, input_cu_seqlens_kv,
-                       input_rng_state, wkspace, stream, handle);
+                       input_cu_seqlens_q_padded, input_cu_seqlens_kv_padded, input_rng_state,
+                       wkspace, stream, handle);
   } else {
     NVTE_ERROR("Invalid combination of data type and sequence length for fused attention. \n");
   }

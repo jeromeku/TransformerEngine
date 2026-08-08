@@ -38,6 +38,7 @@ void fused_attn_fp8_bwd(
     const Tensor *input_dO_f16, const Tensor *input_M, const Tensor *input_S,
     const Tensor *input_SoftmaxOffset, Tensor *input_output_dP, const Tensor *output_dQ,
     const Tensor *output_dK, const Tensor *output_dV, Tensor *output_dSoftmaxOffset,
-    const Tensor *cu_seqlens_q, const Tensor *cu_seqlens_kv, const Tensor *rng_state,
-    Tensor *workspace, cudaStream_t stream, cudnnHandle_t handle);
+    const Tensor *cu_seqlens_q, const Tensor *cu_seqlens_kv, const Tensor *cu_seqlens_q_padded,
+    const Tensor *cu_seqlens_kv_padded, const Tensor *rng_state, Tensor *workspace,
+    cudaStream_t stream, cudnnHandle_t handle);
 }  // namespace transformer_engine

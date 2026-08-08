@@ -691,7 +691,8 @@ void fused_attn_fp8_bwd_impl(
     void* devPtrScaledV, void* devPtrAmaxdP, void* devPtrAmaxdQ, void* devPtrAmaxdK,
     void* devPtrAmaxdV, void* devPtrQ_t, void* devPtrK_t, void* devPtrdO_f16, void* devPtrdO_t,
     void* devPtrDescaleQ_t, void* devPtrDescaleK_t, void* devPtrDescaledO_t, void* devPtrcuSeqlensQ,
-    void* devPtrcuSeqlensKV, void* devPtrDropoutSeed, void* devPtrDropoutOffset,
+    void* devPtrcuSeqlensKV, void* devPtrcuSeqlensQPadded, void* devPtrcuSeqlensKVPadded,
+    void* devPtrDropoutSeed, void* devPtrDropoutOffset,
     cudnn_frontend::DataType_t qkv_tensor_type, cudnn_frontend::DataType_t o_tensor_type,
     cudnn_frontend::DataType_t do_tensor_type, cudnn_frontend::DataType_t dqkv_tensor_type,
     NVTEScalingMode scaling_mode, NVTE_QKV_Format qkv_scale_inv_format,
@@ -1441,11 +1442,12 @@ void fused_attn_fp8_bwd_impl(
         void* devOffsetsdO = slot(8);
         void* devOffsetsdS_unused = slot(9);
 
-        // v1: no physical gaps, so cu_seqlens doubles as cu_seqlens_padded.
+        // Ragged base offsets from the padded (physical) cumulative lengths, so each document is
+        // addressed at its padded base; actual cu_seqlens above drives the per-document extents.
         cu_seqlens_padded_to_offsets<<<offsets_grid, nthreads_per_block, 0, stream>>>(
             nvte_get_qkv_layout_group(qkv_layout), actual_b, b, h, hg, d_qk, d_v,
-            static_cast<const int32_t*>(devPtrcuSeqlensQ),
-            static_cast<const int32_t*>(devPtrcuSeqlensKV), ragged_offset_type, devOffsetsQ,
+            static_cast<const int32_t*>(devPtrcuSeqlensQPadded),
+            static_cast<const int32_t*>(devPtrcuSeqlensKVPadded), ragged_offset_type, devOffsetsQ,
             devOffsetsK, devOffsetsV, devOffsetsO, devOffsetsS);
         NVTE_CHECK_CUDA(cudaGetLastError());
 
@@ -1453,8 +1455,8 @@ void fused_attn_fp8_bwd_impl(
         // multipliers when they do not, which is the case this exists for.
         cu_seqlens_padded_to_offsets<<<offsets_grid, nthreads_per_block, 0, stream>>>(
             nvte_get_qkv_layout_group(dqkv_layout), actual_b, b, h, hg, d_qk, d_v,
-            static_cast<const int32_t*>(devPtrcuSeqlensQ),
-            static_cast<const int32_t*>(devPtrcuSeqlensKV), ragged_offset_type, devOffsetsdQ,
+            static_cast<const int32_t*>(devPtrcuSeqlensQPadded),
+            static_cast<const int32_t*>(devPtrcuSeqlensKVPadded), ragged_offset_type, devOffsetsdQ,
             devOffsetsdK, devOffsetsdV, devOffsetsdO, devOffsetsdS_unused);
         NVTE_CHECK_CUDA(cudaGetLastError());
 
@@ -1639,8 +1641,9 @@ void fused_attn_fp8_bwd(
     const Tensor* input_dO_f16, const Tensor* input_M, const Tensor* input_S,
     const Tensor* input_SoftmaxOffset, Tensor* input_output_dP, const Tensor* output_dQ,
     const Tensor* output_dK, const Tensor* output_dV, Tensor* output_dSoftmaxOffset,
-    const Tensor* cu_seqlens_q, const Tensor* cu_seqlens_kv, const Tensor* rng_state,
-    Tensor* workspace, cudaStream_t stream, cudnnHandle_t handle) {
+    const Tensor* cu_seqlens_q, const Tensor* cu_seqlens_kv, const Tensor* cu_seqlens_q_padded,
+    const Tensor* cu_seqlens_kv_padded, const Tensor* rng_state, Tensor* workspace,
+    cudaStream_t stream, cudnnHandle_t handle) {
   using namespace transformer_engine;
   void* devPtrQ = input_Q->data.dptr;
   void* devPtrK = input_K->data.dptr;
@@ -1709,6 +1712,16 @@ void fused_attn_fp8_bwd(
       reinterpret_cast<void*>(reinterpret_cast<int32_t*>(cu_seqlens_q->data.dptr));
   void* devPtrcuSeqlensKV =
       reinterpret_cast<void*>(reinterpret_cast<int32_t*>(cu_seqlens_kv->data.dptr));
+  // Ragged base offsets from the padded cumulative lengths; fall back to actual when no padded
+  // tensor is supplied (contiguous). See fused_attn_fp8_fwd for the actual/padded split rationale.
+  void* devPtrcuSeqlensQPadded =
+      (cu_seqlens_q_padded != nullptr && cu_seqlens_q_padded->data.dptr != nullptr)
+          ? cu_seqlens_q_padded->data.dptr
+          : devPtrcuSeqlensQ;
+  void* devPtrcuSeqlensKVPadded =
+      (cu_seqlens_kv_padded != nullptr && cu_seqlens_kv_padded->data.dptr != nullptr)
+          ? cu_seqlens_kv_padded->data.dptr
+          : devPtrcuSeqlensKV;
   void* devPtrDropoutSeed =
       reinterpret_cast<void*>(reinterpret_cast<uint64_t*>(rng_state->data.dptr));
   void* devPtrDropoutOffset =
@@ -1735,6 +1748,7 @@ void fused_attn_fp8_bwd(
         devPtrScaledP, devPtrScaledQ, devPtrScaledK, devPtrScaledV, devPtrAmaxdP, devPtrAmaxdQ,
         devPtrAmaxdK, devPtrAmaxdV, devPtrQ_t, devPtrK_t, devPtrdO_f16, devPtrdO_t,
         devPtrDescaleQ_t, devPtrDescaleK_t, devPtrDescaledO_t, devPtrcuSeqlensQ, devPtrcuSeqlensKV,
+        devPtrcuSeqlensQPadded, devPtrcuSeqlensKVPadded,
         devPtrDropoutSeed, devPtrDropoutOffset, get_cudnn_fe_dtype(QKV_type),
         get_cudnn_fe_dtype(O_type), get_cudnn_fe_dtype(dO_type), get_cudnn_fe_dtype(dQKV_type),
         input_dO->scaling_mode, qkv_scale_inv_format, do_scale_inv_format, workspace->data.dptr,
