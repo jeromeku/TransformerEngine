@@ -1573,19 +1573,14 @@ void fused_attn_fp8_fwd(
       reinterpret_cast<void*>(reinterpret_cast<int32_t*>(cu_seqlens_q->data.dptr));
   void* devPtrcuSeqlensKV =
       reinterpret_cast<void*>(reinterpret_cast<int32_t*>(cu_seqlens_kv->data.dptr));
-  // Ragged base offsets are built from the padded (physical) cumulative lengths. Fall back to the
-  // actual cu_seqlens when no padded tensor is supplied -- the contiguous case, where the caller may
-  // pass actual for padded and the two are equal anyway, so the offsets are identical. Judgment
-  // call: if a caller ever passed a null-dptr padded tensor for a genuinely gapped row, offsets
-  // would silently revert to actual; the packed numerics + negative-control tests guard against it.
+  // Ragged base offsets are built from the padded (physical) cumulative lengths; the actual
+  // per-document extents (masking) come from cu_seqlens above. The dispatch always supplies a valid
+  // padded tensor for the fused path -- equal to the actual cu_seqlens when the row is contiguous --
+  // dereferenced directly, matching the F16 path (fused_attn_f16_arbitrary_seqlen.cu:1121).
   void* devPtrcuSeqlensQPadded =
-      (cu_seqlens_q_padded != nullptr && cu_seqlens_q_padded->data.dptr != nullptr)
-          ? cu_seqlens_q_padded->data.dptr
-          : devPtrcuSeqlensQ;
+      reinterpret_cast<void*>(reinterpret_cast<int32_t*>(cu_seqlens_q_padded->data.dptr));
   void* devPtrcuSeqlensKVPadded =
-      (cu_seqlens_kv_padded != nullptr && cu_seqlens_kv_padded->data.dptr != nullptr)
-          ? cu_seqlens_kv_padded->data.dptr
-          : devPtrcuSeqlensKV;
+      reinterpret_cast<void*>(reinterpret_cast<int32_t*>(cu_seqlens_kv_padded->data.dptr));
   void* devPtrDropoutSeed =
       reinterpret_cast<void*>(reinterpret_cast<uint64_t*>(rng_state->data.dptr));
   void* devPtrDropoutOffset =
@@ -1711,16 +1706,12 @@ void fused_attn_fp8_bwd(
       reinterpret_cast<void*>(reinterpret_cast<int32_t*>(cu_seqlens_q->data.dptr));
   void* devPtrcuSeqlensKV =
       reinterpret_cast<void*>(reinterpret_cast<int32_t*>(cu_seqlens_kv->data.dptr));
-  // Ragged base offsets from the padded cumulative lengths; fall back to actual when no padded
-  // tensor is supplied (contiguous). See fused_attn_fp8_fwd for the actual/padded split rationale.
+  // Ragged base offsets from the padded cumulative lengths, dereferenced directly like the forward
+  // and the F16 path; the dispatch always supplies a valid padded tensor (== actual when contiguous).
   void* devPtrcuSeqlensQPadded =
-      (cu_seqlens_q_padded != nullptr && cu_seqlens_q_padded->data.dptr != nullptr)
-          ? cu_seqlens_q_padded->data.dptr
-          : devPtrcuSeqlensQ;
+      reinterpret_cast<void*>(reinterpret_cast<int32_t*>(cu_seqlens_q_padded->data.dptr));
   void* devPtrcuSeqlensKVPadded =
-      (cu_seqlens_kv_padded != nullptr && cu_seqlens_kv_padded->data.dptr != nullptr)
-          ? cu_seqlens_kv_padded->data.dptr
-          : devPtrcuSeqlensKV;
+      reinterpret_cast<void*>(reinterpret_cast<int32_t*>(cu_seqlens_kv_padded->data.dptr));
   void* devPtrDropoutSeed =
       reinterpret_cast<void*>(reinterpret_cast<uint64_t*>(rng_state->data.dptr));
   void* devPtrDropoutOffset =
