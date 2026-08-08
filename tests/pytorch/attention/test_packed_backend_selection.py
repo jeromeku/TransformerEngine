@@ -251,14 +251,15 @@ def test_out_of_range_head_dimensions_are_rejected(config_name):
     assert got != FP8_SUB_BACKEND, f"{config_name} was admitted"
 
 
-def test_physical_gaps_between_sequences_are_rejected():
-    """Packed rows must be contiguous; physical inter-sequence gaps are refused.
+def test_physical_gaps_between_sequences_are_admitted():
+    """Physical inter-sequence gaps are admitted: the ragged offsets are now built from
+    cu_seqlens_*_padded (physical slots), so each document is addressed at its padded base.
 
-    The offsets are derived from cumulative lengths, which cannot express a gap, so admitting this
-    would address into the gap rather than the next sequence.
+    Correctness of that addressing is proven in test_packed_padded_offsets.py; here we only pin that
+    the selector offers the FP8 fused path for pad_between_seqs=True rather than refusing it.
     """
     got = selected_backend(PACKED_CONFIGS["omnii_8b_tp1"], pad_between_seqs=True)
-    assert got != FP8_SUB_BACKEND
+    assert got == FP8_SUB_BACKEND
 
 
 def test_attention_bias_is_rejected():
