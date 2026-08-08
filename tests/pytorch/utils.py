@@ -224,6 +224,18 @@ def reset_rng_states() -> None:
         random.setstate(random_state)
 
 
+# Magnitude gate for FP8 comparisons (see compare_and_assert). Correct FP8 attention outputs/grads
+# have an L2 norm close to the reference; a k-fold scale error (e.g. a missing KV-replica-sum in the
+# a2a backward) gives ~k or ~1/k, far outside. The tolerance is measured, not guessed: across FP8
+# a2a CP=2 and CP=4 on 8b 36:6 and 15b 40:10, out/dq/dk norm-ratio deviation is < 0.003, while dv
+# (the FP8-noisiest gradient) reaches 0.166. A factor-f reduction bug is >= 0.5 deviation (f>=2), so
+# 0.35 clears the worst legit noise (~2x margin) and still catches every factor-2+ scale error (dk,
+# with near-zero legit noise, catches it with large margin). Floor skips near-zero tensors whose
+# ratio is noise-dominated.
+NORM_RATIO_TOL = 0.35
+NORM_RATIO_FLOOR = 1e-4
+
+
 def compare_and_assert(a, b, name_a, name_b, atol, rtol, rmse_tol, is_fp8):
     if a is None and b is None:
         logging.debug(f"{name_a} vs {name_b}: both are None")
@@ -251,6 +263,22 @@ def compare_and_assert(a, b, name_a, name_b, atol, rtol, rmse_tol, is_fp8):
             rmse, rmse_tol * rmse_range, rmse_tol, rmse_range
         )
     )
+
+    # Magnitude gate. The RMSE-relative-to-range check above is blind to a uniform scale error: a
+    # tensor that is a constant factor off (e.g. every element x0.5) has an RMSE small relative to
+    # the value range and passes. The L2 norm ratio catches exactly that -- it is ~1 for correct
+    # FP8 (quantization noise averages out over the tensor) but ~1/k for a k-fold scale error. This
+    # is what gives the a2a KV-replication backward an FP8 gate: a missing dK/dV replica-sum makes
+    # them too small by the replication factor, which this fails and the RMSE check does not.
+    # Floored so near-zero tensors (ratio dominated by noise) do not trip it. NORM_RATIO_TOL is
+    # measured: correct FP8 attention grads/outputs sit within a few % of 1.
+    b_norm = b.float().norm().item()
+    if b_norm > NORM_RATIO_FLOOR:
+        norm_ratio = a.float().norm().item() / b_norm
+        assert abs(norm_ratio - 1.0) < NORM_RATIO_TOL, (
+            f"{name_a} vs {name_b} L2 norm ratio {norm_ratio:.5f} is over magnitude tolerance "
+            f"{NORM_RATIO_TOL} (a scale error the RMSE check is blind to)"
+        )
 
 
 class ModelConfig:
