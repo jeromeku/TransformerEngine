@@ -1062,10 +1062,20 @@ def get_attention_backend(
                 " bias for THD format"
             )
             use_fused_attention = False
-        elif fp8 and fp8_meta["recipe"].fp8_dpa and qkv_format == "thd":
+        elif (
+            fp8
+            and fp8_meta["recipe"].fp8_dpa
+            and qkv_format == "thd"
+            and cp_comm_type != "a2a"
+        ):
+            # a2a is admitted: AttnFuncWithCPAndQKVOA2A threads cu_seqlens_*_padded into the
+            # per-rank fused_attn_fwd, and that kernel now honours padded offsets (Phase 1.1).
+            # p2p / all_gather / a2a+p2p stay disabled: their padded-offset paths for FP8 THD are
+            # not yet validated here (all_gather / a2a+p2p are already refused for THD above).
             logger.debug(
                 "Disabling FusedAttention as it does not support context parallelism with FP8"
-                " attention and THD format"
+                " attention and THD format for cp_comm_type = %s (only a2a is supported)",
+                cp_comm_type,
             )
             use_fused_attention = False
         elif fp8 and fp8_meta["recipe"].fp8_dpa and core_attention_bias_type != "no_bias":
