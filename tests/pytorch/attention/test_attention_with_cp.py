@@ -614,6 +614,27 @@ model_configs_fused_attn = {
         attn_mask_type="causal",
         softmax_type="learnable",
     ),  # GQA, global attention, learnable sink
+    # The 15b arm's geometry (40 heads, 10 KV groups). The 36:6 rows above validate the 8b only;
+    # 40:10 CP=2 feasibility was arithmetic, not measured, until these two. Same two representative
+    # layers: a2a sliding-window + learnable sink, and p2p global vanilla.
+    "cp_5_6": ModelConfig(
+        2,
+        4096,
+        40,
+        128,
+        num_gqa_groups=10,
+        attn_mask_type="causal",
+        window_size=(4096, 0),
+        softmax_type="learnable",
+    ),  # 15b: GQA, sliding-window layer with a learnable sink (a2a only)
+    "cp_5_7": ModelConfig(
+        2,
+        4096,
+        40,
+        128,
+        num_gqa_groups=10,
+        attn_mask_type="causal",
+    ),  # 15b: GQA, global-attention layer, vanilla softmax (p2p)
 }
 
 
@@ -638,6 +659,8 @@ if test_essential:
         "cp_5_3",
         "cp_5_4",
         "cp_5_5",
+        "cp_5_6",
+        "cp_5_7",
     ]
     model_configs_fused_attn = {k: model_configs_fused_attn[k] for k in configs}
     dtypes = ["bf16", "fp8"]
