@@ -102,10 +102,10 @@ void fused_attn_fp8_fwd_impl(
     void* devPtrDescaleK, void* devPtrDescaleV, void* devPtrDescaleS, void* devPtrScaleS,
     void* devPtrScaleO, void* devPtrAmaxO, void* devPtrAmaxS, void* devPtrcuSeqlensQ,
     void* devPtrcuSeqlensKV, void* devPtrcuSeqlensQPadded, void* devPtrcuSeqlensKVPadded,
-    void* devPtrDropoutSeed, void* devPtrDropoutOffset,
-    cudnn_frontend::DataType_t qkv_tensor_type, cudnn_frontend::DataType_t o_tensor_type,
-    NVTEScalingMode scaling_mode, NVTE_QKV_Format qkv_scale_inv_format, void* workspace,
-    size_t* workspace_size, cudaStream_t stream, cudnnHandle_t handle) {
+    void* devPtrDropoutSeed, void* devPtrDropoutOffset, cudnn_frontend::DataType_t qkv_tensor_type,
+    cudnn_frontend::DataType_t o_tensor_type, NVTEScalingMode scaling_mode,
+    NVTE_QKV_Format qkv_scale_inv_format, void* workspace, size_t* workspace_size,
+    cudaStream_t stream, cudnnHandle_t handle) {
   using namespace transformer_engine;
   const auto cudnn_runtime_version = cudnnGetVersion();
   bool is_bias = (bias_type == NVTE_Bias_Type::NVTE_POST_SCALE_BIAS);
@@ -692,12 +692,11 @@ void fused_attn_fp8_bwd_impl(
     void* devPtrAmaxdV, void* devPtrQ_t, void* devPtrK_t, void* devPtrdO_f16, void* devPtrdO_t,
     void* devPtrDescaleQ_t, void* devPtrDescaleK_t, void* devPtrDescaledO_t, void* devPtrcuSeqlensQ,
     void* devPtrcuSeqlensKV, void* devPtrcuSeqlensQPadded, void* devPtrcuSeqlensKVPadded,
-    void* devPtrDropoutSeed, void* devPtrDropoutOffset,
-    cudnn_frontend::DataType_t qkv_tensor_type, cudnn_frontend::DataType_t o_tensor_type,
-    cudnn_frontend::DataType_t do_tensor_type, cudnn_frontend::DataType_t dqkv_tensor_type,
-    NVTEScalingMode scaling_mode, NVTE_QKV_Format qkv_scale_inv_format,
-    NVTE_QKV_Format do_scale_inv_format, void* workspace, size_t* workspace_size,
-    cudaStream_t stream, cudnnHandle_t handle) {
+    void* devPtrDropoutSeed, void* devPtrDropoutOffset, cudnn_frontend::DataType_t qkv_tensor_type,
+    cudnn_frontend::DataType_t o_tensor_type, cudnn_frontend::DataType_t do_tensor_type,
+    cudnn_frontend::DataType_t dqkv_tensor_type, NVTEScalingMode scaling_mode,
+    NVTE_QKV_Format qkv_scale_inv_format, NVTE_QKV_Format do_scale_inv_format, void* workspace,
+    size_t* workspace_size, cudaStream_t stream, cudnnHandle_t handle) {
   using namespace transformer_engine;
   const auto cudnn_runtime_version = cudnnGetVersion();
   bool is_bias = (bias_type == NVTE_Bias_Type::NVTE_POST_SCALE_BIAS);
@@ -1609,9 +1608,9 @@ void fused_attn_fp8_fwd(
         devPtrV, devPtrSoftmaxOffset, devPtrM, devPtrO, devPtrDescaleQ, devPtrDescaleK,
         devPtrDescaleV, devPtrDescaleS, devPtrScaleS, devPtrScaleO, devPtrAmaxO, devPtrAmaxS,
         devPtrcuSeqlensQ, devPtrcuSeqlensKV, devPtrcuSeqlensQPadded, devPtrcuSeqlensKVPadded,
-        devPtrDropoutSeed, devPtrDropoutOffset,
-        get_cudnn_fe_dtype(QKV_type), get_cudnn_fe_dtype(O_type), input_Q->scaling_mode,
-        qkv_scale_inv_format, workspace->data.dptr, &workspace_size, stream, handle);
+        devPtrDropoutSeed, devPtrDropoutOffset, get_cudnn_fe_dtype(QKV_type),
+        get_cudnn_fe_dtype(O_type), input_Q->scaling_mode, qkv_scale_inv_format,
+        workspace->data.dptr, &workspace_size, stream, handle);
   } else {
     NVTE_ERROR("FP8 fused attention only supports qkv_format=BSHD, SBHD, BHSD, or THD.\n");
   }
@@ -1748,11 +1747,10 @@ void fused_attn_fp8_bwd(
         devPtrScaledP, devPtrScaledQ, devPtrScaledK, devPtrScaledV, devPtrAmaxdP, devPtrAmaxdQ,
         devPtrAmaxdK, devPtrAmaxdV, devPtrQ_t, devPtrK_t, devPtrdO_f16, devPtrdO_t,
         devPtrDescaleQ_t, devPtrDescaleK_t, devPtrDescaledO_t, devPtrcuSeqlensQ, devPtrcuSeqlensKV,
-        devPtrcuSeqlensQPadded, devPtrcuSeqlensKVPadded,
-        devPtrDropoutSeed, devPtrDropoutOffset, get_cudnn_fe_dtype(QKV_type),
-        get_cudnn_fe_dtype(O_type), get_cudnn_fe_dtype(dO_type), get_cudnn_fe_dtype(dQKV_type),
-        input_dO->scaling_mode, qkv_scale_inv_format, do_scale_inv_format, workspace->data.dptr,
-        &workspace_size, stream, handle);
+        devPtrcuSeqlensQPadded, devPtrcuSeqlensKVPadded, devPtrDropoutSeed, devPtrDropoutOffset,
+        get_cudnn_fe_dtype(QKV_type), get_cudnn_fe_dtype(O_type), get_cudnn_fe_dtype(dO_type),
+        get_cudnn_fe_dtype(dQKV_type), input_dO->scaling_mode, qkv_scale_inv_format,
+        do_scale_inv_format, workspace->data.dptr, &workspace_size, stream, handle);
   } else {
     NVTE_ERROR("FP8 fused attention only supports dqkv_format=BSHD, SBHD, BHSD, or THD.\n");
   }
