@@ -22,7 +22,8 @@ void fused_attn_fp8_fwd(
     bool bottom_right_diagonal, const Tensor *input_Q, const Tensor *input_K, const Tensor *input_V,
     const Tensor *input_SoftmaxOffset, Tensor *input_output_S, Tensor *output_O,
     NVTETensorPack *Aux_CTX_Tensors, const Tensor *cu_seqlens_q, const Tensor *cu_seqlens_kv,
-    const Tensor *rng_state, Tensor *workspace, cudaStream_t stream, cudnnHandle_t handle);
+    const Tensor *cu_seqlens_q_padded, const Tensor *cu_seqlens_kv_padded, const Tensor *rng_state,
+    Tensor *workspace, cudaStream_t stream, cudnnHandle_t handle);
 
 // fused attention BWD FP8 with separate Q, K, V
 void fused_attn_fp8_bwd(

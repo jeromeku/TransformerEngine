@@ -709,7 +709,8 @@ void nvte_fused_attn_fwd(const NVTETensor Q, const NVTETensor K, const NVTETenso
                        attn_mask_type, softmax_type, window_size_left, window_size_right,
                        bottom_right_diagonal, input_Q, input_K, input_V, input_SoftmaxOffset,
                        input_output_S, output_O, Aux_CTX_Tensors, input_cu_seqlens_q,
-                       input_cu_seqlens_kv, input_rng_state, wkspace, stream, handle);
+                       input_cu_seqlens_kv, input_cu_seqlens_q_padded, input_cu_seqlens_kv_padded,
+                       input_rng_state, wkspace, stream, handle);
   } else {
     NVTE_ERROR("Invalid combination of data type and sequence length for fused attention. \n");
   }
