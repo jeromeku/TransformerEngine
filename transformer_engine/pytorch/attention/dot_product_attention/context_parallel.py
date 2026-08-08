@@ -3957,17 +3957,23 @@ class AttnFuncWithCPAndQKVOA2A(torch.autograd.Function):
         # out contiguously ([h0,h0,h1,h1,...]) so the per-rank contiguous head split preserves the
         # Q->KV mapping. f==1 leaves the divisible case byte-for-byte unchanged. dK/dV are summed
         # back over the f replicas in backward -- omitting that sum makes them too small by f,
-        # silently (forward parity does not catch it); see test_a2a_kv_replication.py. orig_k/v_shape
-        # above are the pre-replication shapes, which backward reduces dK/dV back to.
+        # silently (forward parity does not catch it); see test_a2a_kv_replication.py. Replicating
+        # here (before the FP8 quantize below) keeps this precision-agnostic: for fp8_dpa the raw
+        # BF16 K/V are replicated and then quantized. orig_k/v_shape are re-captured to the
+        # post-replication (working) shapes; backward views dK/dV to those and reduces to the true
+        # num_kv (working // f) after they are back in real precision. The true grad w.r.t. the
+        # original K/V input is what is returned.
         kv_replication_factor = get_a2a_kv_head_replication_factor(q.shape[-2], k.shape[-2], cp_size)
         if kv_replication_factor > 1:
-            assert not fp8, (
-                "a2a KV-head replication is not yet supported for FP8 (BF16 only for now); "
-                f"got num_kv_heads={k.shape[-2]}, cp_size={cp_size} needing factor "
-                f"{kv_replication_factor}"
-            )
+            if isinstance(k, QuantizedTensorStorage):
+                # fp8_mha feeds pre-quantized K/V; replicating a Float8Tensor (and reducing its
+                # quantized grad) is a separate change. fp8_dpa (K/V still BF16 here) is supported.
+                raise NotImplementedError(
+                    "a2a KV-head replication with pre-quantized (fp8_mha) inputs is not supported"
+                )
             k = k.repeat_interleave(kv_replication_factor, dim=-2)
             v = v.repeat_interleave(kv_replication_factor, dim=-2)
+            orig_k_shape, orig_v_shape = k.shape, v.shape
 
         o_format = qkv_format
         _, seq_dim_qkv, _ = get_bsh_dims(qkv_format)
@@ -4052,6 +4058,16 @@ class AttnFuncWithCPAndQKVOA2A(torch.autograd.Function):
         if fp8_meta is not None and fp8_meta.get("local_recipes", None) is not None:
             fp8_recipe = fp8_meta["local_recipes"][0]
         _reject_custom_recipe_under_cp(fp8, fp8_recipe)
+
+        # KV-head replication (above) under FP8 is validated only for delayed scaling with fp8_dpa
+        # (the shipping hybrid recipe): its backward dequantizes dK/dV to BF16 before the replica
+        # reduction. current-scaling / mxfp8 leave dK/dV in a form the reduction has not been
+        # verified against; refuse rather than silently reduce quantized values.
+        if kv_replication_factor > 1 and fp8:
+            assert fp8_recipe.delayed(), (
+                "a2a KV-head replication for FP8 currently supports delayed scaling only (got "
+                f"{type(fp8_recipe).__name__}); cp_size={cp_size} needs factor {kv_replication_factor}"
+            )
 
         fwd_nominal_dtype = q.dtype
         fused_attn_backend = None
@@ -4601,17 +4617,9 @@ class AttnFuncWithCPAndQKVOA2A(torch.autograd.Function):
             cu_seqlens_kv_padded=cu_seqlens_kv_padded,
             a2a_input_names=["dq", "dk", "dv"],
         )
-        # Undo the forward KV-head replication: each original KV head was replicated f times
-        # contiguously along the head axis, so its gradient is the sum over those f replicas. Skip
-        # this and dK/dV are silently too small by f -- a same-precision forward-parity check passes
-        # while training is wrong. Reduces dK/dV from [.., f*num_kv, d] back to orig_k/v_shape
-        # ([.., num_kv, d]). dQ is not replicated. f==1 is a no-op. (BF16 only: the forward asserts
-        # fp8 is not combined with f>1, so dK/dV here are float, not quantized _data.)
-        f = ctx.kv_replication_factor
-        if f > 1:
-            num_kv_k, num_kv_v = ctx.orig_k_shape[-2], ctx.orig_v_shape[-2]
-            dk = dk.reshape(*dk.shape[:-2], num_kv_k, f, dk.shape[-1]).sum(dim=-2)
-            dv = dv.reshape(*dv.shape[:-2], num_kv_v, f, dv.shape[-1]).sum(dim=-2)
+        # orig_k/v_shape are the post-replication (working) shapes when f>1, so dK/dV keep their
+        # f*num_kv heads here; the replica reduction happens below, after they are back in real
+        # precision (FP8 leaves them as quantized _data at this point).
         dq, dk, dv = [
             x.view(y)
             for x, y in zip([dq, dk, dv], [ctx.orig_q_shape, ctx.orig_k_shape, ctx.orig_v_shape])
@@ -4650,6 +4658,19 @@ class AttnFuncWithCPAndQKVOA2A(torch.autograd.Function):
                         dv,
                         src_nominal_dtype=bwd_nominal_dtype,
                     )
+
+        # Undo the forward KV-head replication: each original KV head was replicated f times
+        # contiguously along the head axis, so its gradient is the sum over those f replicas. Done
+        # here, after the FP8 dequantize above, so the sum is over real-valued dK/dV, never quantized
+        # _data. Reduces [.., f*num_kv, d] -> [.., num_kv, d] (the true K/V input shape). dQ is not
+        # replicated. f==1 is a no-op. Skip this and dK/dV are silently too small by f -- a
+        # same-precision forward-parity check passes while training is wrong; the CP-vs-reference
+        # grad comparison in run_dpa_with_cp is the gate (shown able to fail, .sum -> .mean).
+        f = ctx.kv_replication_factor
+        if f > 1:
+            num_kv_k, num_kv_v = dk.shape[-2] // f, dv.shape[-2] // f
+            dk = dk.reshape(*dk.shape[:-2], num_kv_k, f, dk.shape[-1]).sum(dim=-2)
+            dv = dv.reshape(*dv.shape[:-2], num_kv_v, f, dv.shape[-1]).sum(dim=-2)
 
         nvtx_range_pop("transformer_engine.AttnFuncWithCPAndQKVOA2A.backward")
         return (

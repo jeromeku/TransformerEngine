@@ -933,35 +933,46 @@ def test_a2a_kv_head_replication_factor_table(num_q_heads, num_kv_heads, cp_size
 @pytest.mark.skipif(get_cudnn_version() < (8, 9, 7), reason="cuDNN 8.9.7+ is required.")
 @pytest.mark.skipif(get_device_compute_capability() < (9, 0), reason="THD requires sm90+.")
 @pytest.mark.parametrize("model", ["cp_5_1", "cp_5_7", "cp_5_0", "cp_5_6"])
-def test_a2a_kv_head_replication_cp4(cp_pool, model):
+@pytest.mark.parametrize("dtype", ["bf16", "fp8"])
+def test_a2a_kv_head_replication_cp4(cp_pool, dtype, model):
     """a2a at CP=4 for GQA models whose KV-head count is not divisible by 4 (8b 36:6, 15b 40:10).
 
     Without KV replication the a2a head split asserts (6 % 4 != 0, 10 % 4 != 0); with it, each KV
     head is replicated x2 to reach an integer per-rank count. run_dpa_with_cp compares the CP forward
     AND every input gradient against a single-GPU reference, so this exercises the correctness-
     critical backward reduction: a dK/dV too small by the replication factor fails the dk/dv
-    assert_close. Shown able to fail by disabling the reduction (see PHASE2 worklog). BF16 only;
-    cp_5_1/cp_5_7 are global-vanilla, cp_5_0/cp_5_6 add a sliding window + learnable sink to prove
-    replication composes with them. 8b caps at CP=4 (36 % 8 != 0 is a Q-side limit).
+    assert_close. Shown able to fail by disabling the reduction (see PHASE2 worklog). cp_5_1/cp_5_7
+    are global-vanilla, cp_5_0/cp_5_6 add a sliding window + learnable sink to prove replication
+    composes with them. 8b caps at CP=4 (36 % 8 != 0 is a Q-side limit).
+
+    FP8 uses delayed scaling (the shipping hybrid recipe) with fp8_dpa; the replicated BF16 K/V are
+    quantized in the forward and dK/dV are dequantized before the replica reduction. FP8 refuses
+    non-vanilla softmax on packed input, so the sink rows (cp_5_0/cp_5_6) fall back to the "No
+    attention backend available" skip under FP8, leaving the two global-vanilla rows.
     """
     if torch.cuda.device_count() < 4:
         pytest.skip("CP=4 requires 4 GPUs")
     config = model_configs_fused_attn[model]
     if config.num_heads % 4 != 0:
         pytest.skip(f"{model}: num_heads {config.num_heads} not divisible by CP=4")
+    fp8 = dtype == "fp8"
+    if fp8 and config.softmax_type != "vanilla":
+        # FP8 refuses non-vanilla softmax on packed input (the sink offset-gradient bug), so the
+        # sink layers ship in BF16 -- there is no FP8 sink layer to replicate KV for.
+        pytest.skip(f"{model}: FP8 does not support softmax_type={config.softmax_type} on packed")
     pool = cp_pool(4)
     _submit(
         pool,
-        dtype="bf16",
+        dtype=dtype,
         model=model,
         qkv_format="thd",
         kernel_backend="FusedAttention",
         cp_comm_type="a2a",
-        fp8_bwd=False,
-        fp8_dpa=False,
+        fp8_bwd=fp8,
+        fp8_dpa=fp8,
         fp8_mha=False,
-        scaling_mode=None,
-        f16_O=True,
+        scaling_mode="delayed" if fp8 else None,
+        f16_O=not fp8,
         is_training=True,
         deterministic=False,
         log_level=pytest_logging_level,
