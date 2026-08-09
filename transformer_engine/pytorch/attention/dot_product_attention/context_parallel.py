@@ -4,7 +4,6 @@
 
 """Context Parallelism."""
 import os
-import itertools
 from typing import List, Union, Tuple
 import torch
 import transformer_engine_torch as tex
@@ -295,6 +294,23 @@ def reorder_seq_chunks_for_a2a_after_attn(x, chunk_ids_for_a2a, seq_dim, cp_size
     return x
 
 
+def _ragged_arange(starts, lengths, total, device):
+    """Concatenated ``[arange(starts[s], starts[s]+lengths[s]) for s]``, built on-device, no sync.
+
+    ``total`` (== ``sum(lengths)``) is supplied by the caller -- which knows it from the tensor's
+    sequence extent -- so there is no data-dependent allocation and no device->host scalar read. The
+    per-position segment id is built by marking each segment's start offset and cumulative-summing;
+    ``index_add_`` accumulates coincident marks, so zero-length segments are skipped correctly.
+    """
+    seg_off = torch.cumsum(lengths, 0) - lengths  # exclusive prefix sum: each segment's out offset
+    seg_id = torch.zeros(total + 1, dtype=torch.long, device=device)
+    marks = seg_off[1:].to(torch.long)
+    seg_id.index_add_(0, marks, torch.ones_like(marks))
+    seg_id = torch.cumsum(seg_id, 0)[:total]  # [total] segment index per output position
+    within = torch.arange(total, device=device) - seg_off.to(torch.long)[seg_id]
+    return starts.to(torch.long)[seg_id] + within
+
+
 def reorder_seq_chunks_before_a2a_after_attn_thd(x, cu_seqlens, cp_size, seq_dim=0):
     """
     Reorder sequence chunks for A2A communication that happens after attention
@@ -333,31 +349,26 @@ def reorder_seq_chunks_before_a2a_after_attn_thd(x, cu_seqlens, cp_size, seq_dim
                 3.,  4.,  3.,  4.,  3.,  4.,  6.,  7.,  8.,  9.   # chunk on rank 3
              ]
     """
+    # Vectorized, on-device index build (bit-exact with the original per-(cp_rank, document) Python
+    # arange loop; see tests/pytorch/attention/test_thd_a2a_reorder.py). Output order is cp_rank
+    # outer, document middle, the two dual-chunk segments inner -- so the segment (start, length)
+    # arrays are stacked [CP, D, 2] and flattened in that order, then expanded by _ragged_arange.
     total_slices_of_any_sequence = 2 * cp_size
-    slice_sizes = (cu_seqlens[1:] - cu_seqlens[:-1]) // total_slices_of_any_sequence
+    device = cu_seqlens.device
+    slice_sizes = (cu_seqlens[1:] - cu_seqlens[:-1]) // total_slices_of_any_sequence  # [D]
+    seq_starts = cu_seqlens[:-1]  # [D]
+    num_docs = slice_sizes.shape[0]
 
-    indices = [
-        (
-            # 1st segment
-            torch.arange(
-                seq_start + (cp_rank * slice_size),
-                seq_start + ((cp_rank + 1) * slice_size),
-                device=cu_seqlens.device,
-            ),
-            # 2nd segment
-            torch.arange(
-                seq_start + ((total_slices_of_any_sequence - cp_rank - 1) * slice_size),
-                seq_start + ((total_slices_of_any_sequence - cp_rank) * slice_size),
-                device=cu_seqlens.device,
-            ),
-        )
-        for cp_rank in range(cp_size)
-        for slice_size, seq_start in zip(slice_sizes, cu_seqlens[:-1])
-    ]
+    cp_rank = torch.arange(cp_size, device=device)  # [CP]
+    seg1_start = seq_starts[None, :] + cp_rank[:, None] * slice_sizes[None, :]  # [CP, D]
+    seg2_start = (
+        seq_starts[None, :]
+        + (total_slices_of_any_sequence - cp_rank[:, None] - 1) * slice_sizes[None, :]
+    )  # [CP, D]
+    starts = torch.stack((seg1_start, seg2_start), dim=-1).reshape(-1)  # [CP*D*2]
+    lengths = slice_sizes[None, :, None].expand(cp_size, num_docs, 2).reshape(-1)  # [CP*D*2]
 
-    # flatten the list of tuples to a list
-    indices = list(itertools.chain(*indices))
-    indices = torch.cat(indices)
+    indices = _ragged_arange(starts, lengths, x.shape[seq_dim], device)
     return x.index_select(seq_dim, indices)
 
 
@@ -407,31 +418,30 @@ def reorder_seq_chunks_after_a2a_before_attn_thd(x, cu_seqlens, seq_chunk_ids, c
         2. Reorder the entire input tensor by those indices.
     """
 
-    max_cum_seqlen_per_cp_rank = cu_seqlens[-1] // cp_size
-    cu_seqlens_on_any_cp_rank = cu_seqlens // cp_size
+    # Vectorized, on-device index build (bit-exact with the original per-(document, chunk) Python
+    # arange loop; see tests/pytorch/attention/test_thd_a2a_reorder.py). Output order is document
+    # outer, chunk-location (`loc` over seq_chunk_ids) inner. For loc < cp_size the segment is the
+    # document's first half, else its second half; both shifted by max_cum * (chunk_id // 2).
+    device = cu_seqlens.device
+    max_cum_seqlen_per_cp_rank = cu_seqlens[-1] // cp_size  # 0-dim
+    cu_seqlens_on_any_cp_rank = cu_seqlens // cp_size  # [D+1]
+    starts_d = cu_seqlens_on_any_cp_rank[:-1]  # [D]
+    ends_d = cu_seqlens_on_any_cp_rank[1:]  # [D]
+    mid_d = (starts_d + ends_d) // 2  # [D]
+    num_docs = starts_d.shape[0]
+    num_chunks = seq_chunk_ids.shape[0]  # 2*cp_size
 
-    # Go through all the sequence segments (the sizes should be the same from all the ranks)
-    indices = [
-        torch.arange(
-            # Calculate 'left' boundary
-            (
-                start + max_cum_seqlen_per_cp_rank * (chunk_id // 2)
-                if loc < cp_size
-                else (start + end) // 2 + max_cum_seqlen_per_cp_rank * (chunk_id // 2)
-            ),
-            # Calculate 'right' boundary
-            (
-                (start + end) // 2 + max_cum_seqlen_per_cp_rank * (chunk_id // 2)
-                if loc < cp_size
-                else end + max_cum_seqlen_per_cp_rank * (chunk_id // 2)
-            ),
-            device=cu_seqlens.device,
-        )
-        for start, end in zip(cu_seqlens_on_any_cp_rank[:-1], cu_seqlens_on_any_cp_rank[1:])
-        for loc, chunk_id in enumerate(seq_chunk_ids)
-    ]
+    half_off = max_cum_seqlen_per_cp_rank * (seq_chunk_ids // 2)  # [2CP]
+    is_first = torch.arange(num_chunks, device=device) < cp_size  # [2CP]
+    left_base = torch.where(is_first[None, :], starts_d[:, None], mid_d[:, None])  # [D, 2CP]
+    left = left_base + half_off[None, :].to(left_base.dtype)  # [D, 2CP]
+    seg_len = torch.where(
+        is_first[None, :],
+        (mid_d - starts_d)[:, None].expand(num_docs, num_chunks),
+        (ends_d - mid_d)[:, None].expand(num_docs, num_chunks),
+    )  # [D, 2CP]
 
-    indices = torch.cat(indices)
+    indices = _ragged_arange(left.reshape(-1), seg_len.reshape(-1), x.shape[seq_dim], device)
     return x.index_select(seq_dim, indices)
 
 
