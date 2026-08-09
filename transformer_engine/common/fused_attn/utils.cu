@@ -545,7 +545,12 @@ DType get_ragged_offset_dtype(NVTE_QKV_Layout_Group layout_group, int64_t num_at
       break;
   }
 
-  offsets_qkvo[3] = checked_mul(num_attn_heads, head_dim_qk, tokens_q);
+  // O has head_dim_v (the attention output inherits V's head dim), and the ragged O/dO base offset
+  // is addressed as num_attn_heads * head_dim_v * cu_seqlens_q_padded[i] in the conversion kernel.
+  // Sizing this width with head_dim_qk (was) under-counts when head_dim_v > head_dim_qk, so the
+  // int32/int64 boundary check could admit a wrapped O/dO offset. Dormant when d_qk == d_v (the
+  // reviewed 8b/15b shapes) and on cuDNN >= 9.5 (int64 unconditionally), but wrong for asymmetric d.
+  offsets_qkvo[3] = checked_mul(num_attn_heads, head_dim_v, tokens_q);
 
   int64_t max_offset = *std::max_element(offsets_qkvo.begin(), offsets_qkvo.end());
   if (max_offset > std::numeric_limits<int32_t>::max()) {

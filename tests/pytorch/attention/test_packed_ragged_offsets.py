@@ -90,6 +90,26 @@ def test_offset_width_at_the_boundary(total, expected):
     assert bits(t_q=total, t_kv=1, h=1, d_qk=1, d_v=1) == expected
 
 
+def test_o_offset_width_uses_head_dim_v_not_qk():
+    """The O/dO offset width must use head_dim_v (F8).
+
+    O inherits V's head dim, and the conversion kernel addresses the ragged O/dO base as
+    num_attn_heads * head_dim_v * cu_seqlens_q_padded[i]. Sizing that entry with head_dim_qk (the
+    prior bug) under-counts when d_v > d_qk, so the int32/int64 decision can admit a wrapped O
+    offset. Reviewer's case: h=1, t_q=2**24, d_qk=1, d_v=128 -> the true O offset is
+    1*128*2**24 = 2**31 = INT32_MAX + 1, which must widen to 64 bits. With the d_qk bug every other
+    entry stays at 2**24 (32-bit) and the fault is silent.
+    """
+    o_offset = 1 * 128 * (2**24)
+    assert o_offset == INT32_MAX + 1, "fixture: the O offset must cross the boundary by exactly one"
+    assert bits(layout=THD_THD_THD, h=1, hg=1, t_q=2**24, t_kv=1, d_qk=1, d_v=128) == 64, (
+        "O offset sized with head_dim_qk instead of head_dim_v -- admits a wrapped O/dO base pointer"
+    )
+    # Symmetric control: with d_qk == d_v == 128 the same extents give O = 128 * 2**23 = 2**30,
+    # comfortably 32-bit, so my head_dim_v change does not spuriously widen the common d_qk==d_v case.
+    assert bits(layout=THD_THD_THD, h=1, hg=1, t_q=2**23, t_kv=1, d_qk=128, d_v=128) == 32
+
+
 def test_offset_width_uses_the_packed_token_count():
     """The width follows the physical extent, not the longest sequence.
 
