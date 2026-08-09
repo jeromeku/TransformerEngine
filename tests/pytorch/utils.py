@@ -232,11 +232,18 @@ def reset_rng_states() -> None:
 # 0.35 clears the worst legit noise (~2x margin) and still catches every factor-2+ scale error (dk,
 # with near-zero legit noise, catches it with large margin). Floor skips near-zero tensors whose
 # ratio is noise-dominated.
+#
+# SCOPE (opt-in, check_magnitude): this tolerance was calibrated ONLY on the a2a THD KV-replication
+# cases the gate exists to guard. It is off by default because it over-fires on legitimate noise in
+# other regimes -- e.g. current-scaling dense sbhd dV, where the no-CP/CP norm ratio deviation
+# reaches ~0.358, just past 0.35, with no scale error present. Enabling it for every FP8 compare
+# turned such cases red; callers pass check_magnitude=True only where a k-fold reduction bug is the
+# failure mode under test.
 NORM_RATIO_TOL = 0.35
 NORM_RATIO_FLOOR = 1e-4
 
 
-def compare_and_assert(a, b, name_a, name_b, atol, rtol, rmse_tol, is_fp8):
+def compare_and_assert(a, b, name_a, name_b, atol, rtol, rmse_tol, is_fp8, check_magnitude=False):
     if a is None and b is None:
         logging.debug(f"{name_a} vs {name_b}: both are None")
         return
@@ -271,9 +278,10 @@ def compare_and_assert(a, b, name_a, name_b, atol, rtol, rmse_tol, is_fp8):
     # is what gives the a2a KV-replication backward an FP8 gate: a missing dK/dV replica-sum makes
     # them too small by the replication factor, which this fails and the RMSE check does not.
     # Floored so near-zero tensors (ratio dominated by noise) do not trip it. NORM_RATIO_TOL is
-    # measured: correct FP8 attention grads/outputs sit within a few % of 1.
+    # measured: correct FP8 attention grads/outputs sit within a few % of 1. Opt-in (see SCOPE above)
+    # -- off by default so it does not over-fire on FP8 regimes it was not calibrated for.
     b_norm = b.float().norm().item()
-    if b_norm > NORM_RATIO_FLOOR:
+    if check_magnitude and b_norm > NORM_RATIO_FLOOR:
         norm_ratio = a.float().norm().item() / b_norm
         assert abs(norm_ratio - 1.0) < NORM_RATIO_TOL, (
             f"{name_a} vs {name_b} L2 norm ratio {norm_ratio:.5f} is over magnitude tolerance "

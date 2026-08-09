@@ -28,7 +28,8 @@ from transformer_engine.common.recipe import (
     MXFP8BlockScaling,
     Format,
 )
-from utils import ModelConfig, compare_and_assert
+from utils import ModelConfig
+from utils import compare_and_assert as _compare_and_assert
 
 # Pool mode (NVTE_CP_POOL_PG=1) only: shared CP collective groups, created once
 # per pool by run_attention_with_cp_pool.main() and reused across every case in
@@ -686,6 +687,19 @@ def run_dpa_with_cp(
     names_cp = [x + "_cp" for x in names]
     names_no_cp = [x + "_no_cp" for x in names]
     is_fp8 = dtype == "fp8"
+
+    # F3: the FP8 magnitude gate (utils.compare_and_assert) is calibrated only for a2a THD KV-head
+    # replication -- the case whose backward can silently drop the dK/dV replica-sum. Enable it there
+    # only; for every other comm type / layout / scaling it over-fires on legitimate noise (e.g.
+    # current-scaling sbhd dV, ratio dev ~0.358 > 0.35). This local wrapper bakes the scope in so the
+    # comparison call sites below are unchanged; default-off elsewhere restores the pre-gate suite.
+    _check_magnitude = is_fp8 and cp_comm_type == "a2a" and qkv_format == "thd"
+
+    def compare_and_assert(a, b, name_a, name_b, atol, rtol, rmse_tol, is_fp8):
+        _compare_and_assert(
+            a, b, name_a, name_b, atol, rtol, rmse_tol, is_fp8, check_magnitude=_check_magnitude
+        )
+
     for i, t in enumerate(tensors_no_cp):
         if t is not None:
             if "softmax_offset" not in names[i] and "max_logit" not in names[i]:
