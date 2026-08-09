@@ -120,7 +120,7 @@ void fused_attn_fp8_fwd_impl(
   auto bias_h = h;
   auto bias_sq = s_q;
   auto bias_skv = s_kv;
-  NVTE_CHECK(~is_bias, "FP8 fused attention does not support pre/post_scale_bias yet!");
+  NVTE_CHECK(!is_bias, "FP8 fused attention does not support pre/post_scale_bias yet!");
   NVTE_CHECK(~is_alibi, "FP8 fused attention does not support ALiBi yet!");
   bool is_delayed_scaling = (scaling_mode == NVTE_DELAYED_TENSOR_SCALING) &&
                             (o_tensor_type == cudnn_frontend::DataType_t::FP8_E4M3 ||
@@ -711,7 +711,7 @@ void fused_attn_fp8_bwd_impl(
   auto bias_h = h;
   auto bias_sq = s_q;
   auto bias_skv = s_kv;
-  NVTE_CHECK(~is_bias, "FP8 fused attention does not support pre/post_scale_bias yet!");
+  NVTE_CHECK(!is_bias, "FP8 fused attention does not support pre/post_scale_bias yet!");
   NVTE_CHECK(~is_alibi, "FP8 fused attention does not support ALiBi yet!");
   bool is_delayed_scaling = (scaling_mode == NVTE_DELAYED_TENSOR_SCALING) &&
                             (dqkv_tensor_type == cudnn_frontend::DataType_t::FP8_E4M3 ||

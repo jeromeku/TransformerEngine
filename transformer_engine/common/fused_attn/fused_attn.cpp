@@ -312,7 +312,13 @@ NVTE_Fused_Attn_Backend nvte_get_fused_attn_backend(
          //     cannot arise on this path.
          // Physical inter-sequence gaps (cu_seqlens_padded != cu_seqlens) are excluded in the
          // Python layer, which is where pad_between_seqs is known; this query never sees it.
+         //   * Vanilla softmax only. For packed THD the FP8 softmax-offset (sink) gradient is
+         //     wrong, so the Python selector disables non-vanilla FP8 THD (dot_product_attention/
+         //     utils.py). Mirror that here so a C-API/extension caller querying the native selector
+         //     directly is not told a known-silent-wrong mode is supported. Dense (bshd/sbhd/bhsd)
+         //     off-by-one/learnable remain admitted above -- the defect is THD-specific.
          (qkv_format == NVTE_QKV_Format::NVTE_THD && sm_arch_ >= 100 && sm_arch_ != 120 &&
+          softmax_type == NVTE_Softmax_Type::NVTE_VANILLA_SOFTMAX &&
           (attn_mask_type == NVTE_Mask_Type::NVTE_PADDING_MASK ||
            attn_mask_type == NVTE_Mask_Type::NVTE_PADDING_CAUSAL_MASK))))) &&
       // The F16 branch uses the version-aware form; the FP8 branch rejected int64 offsets
