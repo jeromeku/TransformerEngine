@@ -3,7 +3,9 @@
 # See LICENSE for license information.
 
 import copy
+import json
 import os
+import statistics
 import sys
 import logging
 from contextlib import nullcontext
@@ -11,6 +13,7 @@ import torch
 import torch.distributed as dist
 from transformer_engine.pytorch.attention.dot_product_attention.context_parallel import (
     get_cu_seqlens_on_cp_rank,
+    get_a2a_kv_head_replication_factor,
 )
 from transformer_engine.pytorch.attention.dot_product_attention.utils import combine_and_quantize
 import transformer_engine_torch as tex
@@ -43,12 +46,141 @@ _pool_cp_comm_sub_groups: list = []
 dtypes = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp8": torch.bfloat16}
 
 
+def _bench_cp_attention(
+    core_attn, q_, k_, v_, dout_, bias_, config, fp8_context, is_training, fp8_bwd, fp8_mha,
+    dout_quantizer, cu_seqlens_q, cu_seqlens_kv, cu_seqlens_q_padded, cu_seqlens_kv_padded,
+    model, dtype, qkv_format, cp_comm_type, world_size, rank, bench_iters, bench_warmup, bench_out,
+    bench_profile,
+):
+    """Time the CP forward/backward and write a JSON row (rank 0).
+
+    Reuses the exact CP inputs and module built by run_dpa_with_cp, so the measured path is the
+    validated one. fwd and bwd are timed separately with CUDA events; peak memory is measured after a
+    reset that excludes warmup + setup. fwd/bwd/step are rank-0's GPU timeline (the a2a/p2p
+    collectives synchronise ranks, so this includes communication wait); step_ms_slowest is the
+    max median step across ranks, which is what actually gates a training step.
+
+    When bench_profile > 0, a torch.profiler pass attributes per-iter device (kernel) time to
+    attention / comm(nccl) / quantize / other categories. Note: kernels on different streams overlap
+    (a2a on cp_stream vs attention on the main stream), so the category device times are the *work
+    distribution*, and their sum can exceed the wall-clock step; prof_total_dev_ms vs step_ms shows
+    the overlap. This is measured device work, not an assumed attribution.
+    """
+    common = dict(
+        core_attention_bias_type=config.attn_bias_type,
+        core_attention_bias=bias_,
+        cu_seqlens_q=cu_seqlens_q,
+        cu_seqlens_kv=cu_seqlens_kv,
+        cu_seqlens_q_padded=cu_seqlens_q_padded,
+        cu_seqlens_kv_padded=cu_seqlens_kv_padded,
+        fp8_output=fp8_mha,
+    )
+    dout_bwd = dout_quantizer(dout_) if (is_training and fp8_bwd and fp8_mha) else dout_
+
+    def _step(measure):
+        for x in (q_, k_, v_):
+            x.grad = None
+        if config.softmax_type != "vanilla":
+            core_attn.softmax_offset.grad = None
+        if measure:
+            f0, f1, b0, b1 = (torch.cuda.Event(enable_timing=True) for _ in range(4))
+        with fp8_context:
+            if measure:
+                f0.record()
+            out = core_attn(q_, k_, v_, **common)
+            if config.return_max_logit:
+                out = out[0]
+            if measure:
+                f1.record()
+            if is_training:
+                if measure:
+                    b0.record()
+                out.backward(dout_bwd)
+                if measure:
+                    b1.record()
+        if measure:
+            torch.cuda.synchronize()
+            return f0.elapsed_time(f1), (b0.elapsed_time(b1) if is_training else 0.0)
+        return None, None
+
+    for _ in range(bench_warmup):
+        _step(False)
+    torch.cuda.synchronize()
+    torch.cuda.reset_peak_memory_stats()
+    fwd_ms, bwd_ms = [], []
+    for _ in range(bench_iters):
+        f, b = _step(True)
+        fwd_ms.append(f)
+        bwd_ms.append(b)
+    peak_mib = torch.cuda.max_memory_allocated() / (1024**2)
+
+    prof_cats = {}
+    if bench_profile:
+        import torch.profiler as _tp
+
+        cats = {"attention": 0.0, "comm": 0.0, "quantize": 0.0, "other": 0.0}
+        with _tp.profile(activities=[_tp.ProfilerActivity.CUDA]) as prof:
+            for _ in range(bench_profile):
+                _step(False)
+            torch.cuda.synchronize()
+        for evt in prof.key_averages():
+            dev_us = float(evt.self_device_time_total)
+            if dev_us <= 0:
+                continue
+            n = evt.key.lower()
+            if any(s in n for s in ("fmha", "attn", "flash", "cudnn", "fused_attention")):
+                cats["attention"] += dev_us
+            elif any(s in n for s in ("nccl", "alltoall", "all_to_all", "sendrecv", "reduce")):
+                cats["comm"] += dev_us
+            elif any(s in n for s in ("quantize", "dequant", "amax", "fp8", "e4m3", "e5m2")):
+                cats["quantize"] += dev_us
+            else:
+                cats["other"] += dev_us
+        prof_cats = {f"prof_{k}_ms": round(v / 1000.0 / bench_profile, 4) for k, v in cats.items()}
+        prof_cats["prof_total_dev_ms"] = round(sum(cats.values()) / 1000.0 / bench_profile, 4)
+
+    step_med = statistics.median([a + b for a, b in zip(fwd_ms, bwd_ms)])
+    slowest = torch.tensor([step_med], device="cuda")
+    dist.all_reduce(slowest, op=dist.ReduceOp.MAX)
+
+    replication = (
+        get_a2a_kv_head_replication_factor(config.num_heads, config.num_gqa_groups, world_size)
+        if cp_comm_type in ("a2a", "a2a+p2p")
+        else 1
+    )
+    row = dict(
+        model=model,
+        dtype=dtype,
+        qkv_format=qkv_format,
+        cp_comm_type=cp_comm_type,
+        cp_size=world_size,
+        seqlen=config.max_seqlen_q,
+        total_tokens=int(cu_seqlens_q_padded[-1]),
+        num_heads=config.num_heads,
+        num_gqa_groups=config.num_gqa_groups,
+        kv_replication_factor=replication,
+        fwd_ms=round(statistics.median(fwd_ms), 4),
+        bwd_ms=round(statistics.median(bwd_ms), 4),
+        step_ms=round(step_med, 4),
+        step_ms_slowest=round(slowest.item(), 4),
+        peak_mib=round(peak_mib, 1),
+        iters=bench_iters,
+        warmup=bench_warmup,
+        **prof_cats,
+    )
+    if rank == 0 and bench_out:
+        with open(bench_out, "a") as fh:
+            fh.write(json.dumps(row) + "\n")
+    logging.info("[Rank %d] bench %s", rank, row)
+
+
 def generate_input_shapes(
     qkv_format: str,
     config: ModelConfig,
     world_size: int,
     kernel_backend: str,
     fa_pad_between_seqs: str = "False",
+    bench: bool = False,
 ):
     if qkv_format == "bshd":
         q_input_shape = (
@@ -107,7 +239,17 @@ def generate_input_shapes(
         cu_seqlens_q_padded = None
         cu_seqlens_kv_padded = None
     elif qkv_format == "thd":
-        seqlens_q = torch.randint(0, config.max_seqlen_q + 1, [config.batch_size]).to(torch.int32)
+        if bench:
+            # Deterministic full-length documents so total tokens = batch * seqlen exactly. The
+            # correctness default draws random per-doc lengths, which is right for varied test cases
+            # but makes benchmark workload (and thus timing/memory) random per run.
+            seqlens_q = torch.full(
+                [config.batch_size], config.max_seqlen_q, dtype=torch.int32
+            )
+        else:
+            seqlens_q = torch.randint(
+                0, config.max_seqlen_q + 1, [config.batch_size]
+            ).to(torch.int32)
         seqlens_q_padded = (seqlens_q + 2 * world_size - 1) // (world_size * 2) * (world_size * 2)
         cu_seqlens_q_padded = torch.cat(
             [
@@ -204,11 +346,28 @@ def run_dpa_with_cp(
     fa_pad_between_seqs="False",
     deterministic="False",
     log_level=logging.WARNING,
+    bench_iters="0",
+    bench_warmup="5",
+    bench_out="",
+    bench_seqlen="0",
+    bench_batch="0",
+    bench_profile="0",
 ):
-    """Test DotProductAttention module with context parallelism"""
+    """Test DotProductAttention module with context parallelism.
+
+    When bench_iters > 0, the reference (no-CP) run and the correctness comparison are skipped;
+    instead the CP forward/backward is timed over bench_iters iterations (after bench_warmup) and a
+    JSON row (timings + peak memory + replication factor) is written to bench_out by rank 0.
+    bench_seqlen > 0 overrides the config's max_seqlen_q/kv (to sweep sequence length).
+    """
     logging.root.setLevel(log_level)
     # When is_training is False, gradient outputs are None.
     is_training = is_training == "True"
+    bench_iters = int(bench_iters)
+    bench_warmup = int(bench_warmup)
+    bench_seqlen = int(bench_seqlen)
+    bench_batch = int(bench_batch)
+    bench_profile = int(bench_profile)
 
     # set up environment variables and config
     if deterministic == "True":
@@ -241,6 +400,11 @@ def run_dpa_with_cp(
             config.attn_mask_type = "padding_causal"
         else:
             config.attn_mask_type = "padding"
+    if bench_seqlen:
+        config.max_seqlen_q = bench_seqlen
+        config.max_seqlen_kv = bench_seqlen
+    if bench_batch:
+        config.batch_size = bench_batch
 
     # set up distributed group
     rank = int(os.getenv("RANK", "0"))
@@ -320,7 +484,9 @@ def run_dpa_with_cp(
         cu_seqlens_kv,
         cu_seqlens_q_padded,
         cu_seqlens_kv_padded,
-    ) = generate_input_shapes(qkv_format, config, world_size, kernel_backend, fa_pad_between_seqs)
+    ) = generate_input_shapes(
+        qkv_format, config, world_size, kernel_backend, fa_pad_between_seqs, bench=bool(bench_iters)
+    )
     q_orig = torch.clamp(torch.randn(q_input_shape, dtype=dtypes[dtype]), min=-1, max=1).cuda()
     k_orig = torch.clamp(torch.randn(k_input_shape, dtype=dtypes[dtype]), min=-1, max=1).cuda()
     v_orig = torch.clamp(torch.randn(v_input_shape, dtype=dtypes[dtype]), min=-1, max=1).cuda()
@@ -393,42 +559,44 @@ def run_dpa_with_cp(
         bias = None
 
     ############ run without CP ############
-    logging.info(f"[Rank {rank}] Run without context parallelism")
-    if dtype == "fp8":
-        fp8_context = autocast(enabled=True, recipe=fp8_recipe, amax_reduction_group=cp_comm_group)
-    else:
-        fp8_context = nullcontext()
-    max_logit = None
-    with fp8_context:
-        # q, k, v, out in FP8; dout in F16
-        out = core_attn(
-            q,
-            k,
-            v,
-            core_attention_bias_type=config.attn_bias_type,
-            core_attention_bias=bias,
-            cu_seqlens_q=cu_seqlens_q,
-            cu_seqlens_kv=cu_seqlens_kv,
-            cu_seqlens_q_padded=cu_seqlens_q_padded,
-            cu_seqlens_kv_padded=cu_seqlens_kv_padded,
-            fp8_output=fp8_mha,
-        )
-        if config.return_max_logit:
-            out, max_logit = out
+    # Skipped under benchmarking: there is no comparison, and running it would leave the no-CP
+    # tensors resident, inflating the CP peak-memory measurement.
+    dq = dk = dv = dbias = d_softmax_offset = max_logit = out = None
+    if not bench_iters:
+        logging.info(f"[Rank {rank}] Run without context parallelism")
+        if dtype == "fp8":
+            fp8_context = autocast(
+                enabled=True, recipe=fp8_recipe, amax_reduction_group=cp_comm_group
+            )
+        else:
+            fp8_context = nullcontext()
+        with fp8_context:
+            # q, k, v, out in FP8; dout in F16
+            out = core_attn(
+                q,
+                k,
+                v,
+                core_attention_bias_type=config.attn_bias_type,
+                core_attention_bias=bias,
+                cu_seqlens_q=cu_seqlens_q,
+                cu_seqlens_kv=cu_seqlens_kv,
+                cu_seqlens_q_padded=cu_seqlens_q_padded,
+                cu_seqlens_kv_padded=cu_seqlens_kv_padded,
+                fp8_output=fp8_mha,
+            )
+            if config.return_max_logit:
+                out, max_logit = out
+            if is_training:
+                if fp8_bwd and fp8_mha:
+                    dout_fp8 = dout_quantizer(dout)
+                    out.backward(dout_fp8)
+                else:
+                    out.backward(dout)
         if is_training:
-            if fp8_bwd and fp8_mha:
-                dout_fp8 = dout_quantizer(dout)
-                out.backward(dout_fp8)
-            else:
-                out.backward(dout)
-    if is_training:
-        dq, dk, dv, dbias = q.grad, k.grad, v.grad, bias.grad if bias is not None else None
-        d_softmax_offset = (
-            core_attn.softmax_offset.grad if config.softmax_type != "vanilla" else None
-        )
-    else:
-        dq, dk, dv, dbias = None, None, None, None
-        d_softmax_offset = None
+            dq, dk, dv, dbias = q.grad, k.grad, v.grad, bias.grad if bias is not None else None
+            d_softmax_offset = (
+                core_attn.softmax_offset.grad if config.softmax_type != "vanilla" else None
+            )
 
     ############ run with CP ############
     logging.info(f"[Rank {rank}] Run with context parallelism")
@@ -513,6 +681,18 @@ def run_dpa_with_cp(
         fp8_context = autocast(enabled=True, recipe=fp8_recipe, amax_reduction_group=cp_comm_group)
     else:
         fp8_context = nullcontext()
+
+    if bench_iters:
+        _bench_cp_attention(
+            core_attn, q_, k_, v_, dout_, bias_, config, fp8_context, is_training,
+            fp8_bwd, fp8_mha, dout_quantizer if dtype == "fp8" else None,
+            cu_seqlens_q, cu_seqlens_kv, cu_seqlens_q_padded, cu_seqlens_kv_padded,
+            model, dtype, qkv_format, cp_comm_type, world_size, rank, bench_iters, bench_warmup,
+            bench_out, bench_profile,
+        )
+        if not _pool_managed_pg:
+            dist.destroy_process_group()
+        return
 
     # run attention
     max_logit_ = None
