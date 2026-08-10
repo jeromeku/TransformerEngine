@@ -331,6 +331,28 @@ def get_tols(config, dtype):
     return atol, rtol, rmse_tol
 
 
+def _reset_delayed_scaling_state(module):
+    reset = 0
+    fp8_meta = getattr(module, "fp8_meta", {}) or {}
+    for name in ("scaling_fwd", "scaling_bwd"):
+        state = fp8_meta.get(name)
+        if state is None:
+            continue
+        for attr, value in (("scale", 1.0), ("amax_history", 0.0)):
+            tensor = getattr(state, attr, None)
+            if isinstance(tensor, torch.Tensor):
+                tensor.fill_(value)
+                reset += 1
+    for group in (getattr(module, "quantizers", {}) or {}).values():
+        for quantizer in group:
+            for attr, value in (("scale", 1.0), ("amax", 0.0)):
+                tensor = getattr(quantizer, attr, None)
+                if isinstance(tensor, torch.Tensor):
+                    tensor.fill_(value)
+                    reset += 1
+    return reset
+
+
 def run_dpa_with_cp(
     dtype="bf16",
     model=None,
@@ -678,6 +700,11 @@ def run_dpa_with_cp(
     if dtype == "fp8":
         core_attn.fp8_initialized = False
         core_attn.fp8_meta_tensors_initialized = False
+        if not bench_iters and scaling_mode == "delayed":
+            assert _reset_delayed_scaling_state(core_attn) > 0, (
+                "no delayed FP8 scaling state was reset before the CP run; the reference and CP runs "
+                "would be compared at different scales"
+            )
         fp8_context = autocast(enabled=True, recipe=fp8_recipe, amax_reduction_group=cp_comm_group)
     else:
         fp8_context = nullcontext()
