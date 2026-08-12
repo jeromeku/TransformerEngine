@@ -644,6 +644,16 @@ void thd_grad_correction(Tensor grad, const Tensor &grad_per_step, const Tensor 
                          const std::string &first_half, const std::string &second_half,
                          cudaStream_t stream) {
   using namespace transformer_engine;
+  // FP8 gradients hold raw byte encodings (passed here as kByte via the FP8 tensor's ._data, or as an
+  // FP8 dtype directly): "add" is undefined on them, but "copy"/"none" placement is a pure byte move
+  // (CopyFunctor/EmptyFunctor are dtype-agnostic float4 copies), so dispatch a 1-byte instantiation.
+  // Used by the p2p delayed-FP8 THD half-gradient scatter.
+  if (grad.dtype() == DType::kByte || is_fp8_dtype(grad.dtype())) {
+    NVTE_CHECK(first_half != "add" && second_half != "add",
+               "thd_grad_correction: \"add\" is undefined for FP8 grads; use \"copy\"/\"none\" only");
+    thd_grad_dispatcher<byte>(grad, grad_per_step, cu_seqlens, first_half, second_half, stream);
+    return;
+  }
   TRANSFORMER_ENGINE_TYPE_SWITCH_NON_FP8ONLY(
       grad.dtype(), dtype,
       thd_grad_dispatcher<dtype>(grad, grad_per_step, cu_seqlens, first_half, second_half,

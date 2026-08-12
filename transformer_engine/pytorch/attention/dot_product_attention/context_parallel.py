@@ -2722,7 +2722,8 @@ class AttnFuncWithCPAndKVP2P(torch.autograd.Function):
                         dq[0].fill_(0)
                         dq[1].copy_(dq_)
                     else:
-                        dq.copy_(dq_)
+                        dq.fill_(0)
+                        tex.thd_grad_correction(dq, dq_, cu_seqlens_q_padded, "none", "copy")
             elif causal:
                 if i > (cp_size - rank - 1):
                     dq.add_(dq_)
@@ -2809,8 +2810,10 @@ class AttnFuncWithCPAndKVP2P(torch.autograd.Function):
                         dv[0].copy_(dv_)
                         dv[1].fill_(0)
                     else:
-                        dk.copy_(dk_)
-                        dv.copy_(dv_)
+                        dk.fill_(0)
+                        dv.fill_(0)
+                        tex.thd_grad_correction(dk, dk_, cu_seqlens_kv_padded, "copy", "none")
+                        tex.thd_grad_correction(dv, dv_, cu_seqlens_kv_padded, "copy", "none")
                 else:
                     dk.copy_(dk_)
                     dv.copy_(dv_)
