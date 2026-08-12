@@ -941,8 +941,11 @@ def test_cp_with_fused_attention(
         (36, 6, 8, 1),  # 8b at CP=8: no factor divides fanout 6 with (f*6)%8==0 -> 1 (assert fires)
         (40, 10, 2, 1),  # 15b, already divisible
         (40, 10, 4, 2),  # 15b at CP=4: 10 -> x2 -> 20
-        (40, 10, 8, 4),  # 15b at CP=8: 10 -> x4 -> 40
+        (40, 10, 8, 4),  # 15b TP1-local at CP=8: 10 -> x4 -> 40
+        (16, 4, 4, 1),  # production 8b TP2-local at CP=4: already divisible
         (20, 5, 2, 2),  # 15b TP2-local at CP=2: 5 -> x2 -> 10
+        (20, 5, 4, 4),  # production 15b TP2-local at CP=4: 5 -> x4 -> 20
+        (32, 8, 8, 1),  # production 8b TP1-local at CP=8: already divisible
         (16, 16, 4, 1),  # MHA, already divisible
         (16, 3, 4, 1),  # fanout 16/3 non-integer -> not clean GQA -> 1
     ],
