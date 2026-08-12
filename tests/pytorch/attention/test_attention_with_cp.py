@@ -753,11 +753,15 @@ def test_cp_with_fused_attention(
     if dtype != "fp8" and (fp8_mha or fp8_dpa):
         pytest.skip("dtype!=fp8 requires fp8_dpa=False and fp8_mha=False!")
 
-    if dtype == "fp8" and qkv_format == "thd" and cp_comm_type != "a2a":
-        # FP8 THD CP is enabled for a2a only: its per-rank kernel receives cu_seqlens_*_padded
-        # (Phase 1.1). p2p / all_gather / a2a+p2p FP8 THD are not yet validated; the selector
-        # refuses them too, so they also skip at the "No attention backend available" check below.
-        pytest.skip("FP8 THD context parallelism is only supported with cp_comm_type=a2a!")
+    if dtype == "fp8" and qkv_format == "thd" and not (
+        cp_comm_type == "a2a"
+        or (cp_comm_type == "p2p" and scaling_mode == "delayed" and fp8_dpa and not fp8_mha)
+    ):
+        # FP8 THD CP is enabled for a2a, and for delayed-scaling p2p (fp8_dpa): both thread
+        # cu_seqlens_*_padded into the per-rank kernels and the p2p ring's delayed-FP8 THD
+        # half-gradient scatter is handled. all_gather / a2a+p2p, and non-delayed / fp8_mha p2p, are
+        # refused by the selector and skip at the "No attention backend available" check below.
+        pytest.skip("FP8 THD context parallelism supports cp_comm_type=a2a, or delayed p2p (fp8_dpa)!")
     if dtype == "fp8" and config.attn_bias_type != "no_bias":
         pytest.skip("No support for FP8 attention with bias!")
 
@@ -857,13 +861,15 @@ def test_cp_with_fused_attention(
     # sequence-sharding ring path implements CP causal via a bottom-right-aligned causal on the last
     # chunk, so its reference needs that variant. a2a is excluded: it gathers the full sequence on
     # each rank and runs plain (padding_)causal (AttnFuncWithCPAndQKVOA2A passes the original
-    # attn_mask_type to the per-rank kernel), so it never uses the bottom-right variant. FP8 does not
-    # implement padding_causal_bottom_right over packed input, so without this exclusion every FP8
-    # THD a2a case would be skipped here despite the a2a path being available and correct.
+    # attn_mask_type to the per-rank kernel), so it never uses the bottom-right variant. FP8 THD p2p
+    # is excluded for the same reason: its ring passes padding_causal on the diagonal and padding on
+    # the triangles (bottom_right lives only in the all-gather class), and FP8 does not implement
+    # padding_causal_bottom_right over packed input, so the re-query would false-skip a path that runs.
     if (
         fused_attn_supported
         and config.attn_mask_type in ["causal", "padding_causal"]
         and cp_comm_type != "a2a"
+        and not (fp8 and qkv_format == "thd")
     ):
         config_copy = copy.deepcopy(config)
         config_copy.context_parallel = False
