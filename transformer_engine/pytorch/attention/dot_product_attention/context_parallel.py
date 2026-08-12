@@ -46,6 +46,7 @@ from transformer_engine.pytorch.attention.dot_product_attention.utils import (
     combine_and_dequantize,
     print_quantizers,
     mxfp8_quantize_fast_path,
+    get_a2a_kv_head_replication_factor,
 )
 
 _cu_seqlens_info_with_cp_cache = {}
@@ -3884,31 +3885,6 @@ class AttnFuncWithCPAndKVAllGather(torch.autograd.Function):
         )
 
 
-def get_a2a_kv_head_replication_factor(num_q_heads, num_kv_heads, cp_size):
-    """Smallest structured KV-head replication factor for a2a, or 1 when none is needed/possible.
-
-    a2a shards the head dimension across cp ranks, so it needs num_kv_heads % cp_size == 0. When a
-    GQA config has fewer (or an indivisible number of) KV heads -- e.g. 6 KV groups at cp_size=4 --
-    replicate each KV head ``f`` times so ``(f*num_kv_heads) % cp_size == 0``. ``f`` is chosen to
-    divide the GQA fanout (num_q_heads // num_kv_heads) so the per-rank Q:KV ratio stays an integer;
-    this is structured replication, NOT padding KV up to a multiple of cp_size (which would leave a
-    fractional ratio the kernel rejects). Mirrors ``_smallest_kv_replication_factor`` in radical's
-    ``cp_utils.py`` (cross-checked equal in test_a2a_kv_replication.py); duplicated here because TE
-    cannot import radical.
-
-    Returns 1 when: already divisible; not a clean GQA config (num_q_heads % num_kv_heads != 0); or
-    no factor works (e.g. 36 heads at cp_size=8) -- in the last case the caller's num_heads % cp_size
-    assert then fires with its original message.
-    """
-    if num_kv_heads == 0 or num_q_heads % num_kv_heads != 0:
-        return 1
-    if num_kv_heads % cp_size == 0:
-        return 1
-    fanout = num_q_heads // num_kv_heads
-    for f in range(1, fanout + 1):
-        if fanout % f == 0 and (f * num_kv_heads) % cp_size == 0:
-            return f
-    return 1
 
 
 class AttnFuncWithCPAndQKVOA2A(torch.autograd.Function):

@@ -106,6 +106,25 @@ def _get_supported_versions(version_min, version_max):
     return ">= " + str(version_min) + ", " + "<= " + str(version_max)
 
 
+def get_a2a_kv_head_replication_factor(num_q_heads, num_kv_heads, cp_size):
+    """Return the smallest structured KV-head replication factor for pure A2A CP.
+
+    The factor must divide the GQA fanout and make the working KV-head count divisible by the
+    context-parallel size. Returning one preserves already-divisible and unsupported geometries;
+    callers still validate the resulting Q and KV divisibility and fail closed.
+    """
+    assert cp_size > 0
+    if num_kv_heads == 0 or num_q_heads % num_kv_heads != 0:
+        return 1
+    if num_kv_heads % cp_size == 0:
+        return 1
+    fanout = num_q_heads // num_kv_heads
+    for factor in range(1, fanout + 1):
+        if fanout % factor == 0 and (factor * num_kv_heads) % cp_size == 0:
+            return factor
+    return 1
+
+
 def maybe_contiguous(tensor: torch.Tensor) -> torch.Tensor:
     """Make tensor contiguous if final stride is not 1."""
     return tensor.contiguous() if tensor.stride(-1) != 1 else tensor
@@ -360,7 +379,7 @@ def get_attention_backend(
     attention_dropout = attention_params.attention_dropout
     context_parallel = attention_params.context_parallel
     cp_comm_type = attention_params.cp_comm_type
-    cp_size = attention_params.cp_size  # pylint: disable=unused-variable
+    cp_size = attention_params.cp_size
     deterministic = attention_params.deterministic
     is_training = attention_params.is_training
     fp8 = attention_params.fp8
@@ -1109,11 +1128,28 @@ def get_attention_backend(
                 cp_comm_type,
             )
             use_fused_attention = False
-        elif cp_comm_type in ["a2a", "a2a+p2p"] and (num_heads % 2 != 0 or num_gqa_groups % 2 != 0):
+        elif cp_comm_type == "a2a":
+            kv_replication_factor = get_a2a_kv_head_replication_factor(
+                num_heads, num_gqa_groups, cp_size
+            )
+            working_num_gqa_groups = kv_replication_factor * num_gqa_groups
+            if num_heads % cp_size != 0 or working_num_gqa_groups % cp_size != 0:
+                logger.debug(
+                    "Disabling FusedAttention as pure a2a requires Q and working KV heads "
+                    "divisible by cp_size (got num_heads = %s, num_gqa_groups = %s, "
+                    "kv_replication_factor = %s, cp_size = %s)",
+                    num_heads,
+                    num_gqa_groups,
+                    kv_replication_factor,
+                    cp_size,
+                )
+                use_fused_attention = False
+        elif cp_comm_type == "a2a+p2p" and (
+            num_heads % 2 != 0 or num_gqa_groups % 2 != 0
+        ):
             logger.debug(
-                "Disabling FusedAttention as cp_comm_type = %s requires num_heads and"
+                "Disabling FusedAttention as cp_comm_type = a2a+p2p requires num_heads and"
                 " num_gqa_groups divisible by 2 (got num_heads = %s, num_gqa_groups = %s)",
-                cp_comm_type,
                 num_heads,
                 num_gqa_groups,
             )
