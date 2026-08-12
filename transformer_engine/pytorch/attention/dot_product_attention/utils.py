@@ -1086,14 +1086,16 @@ def get_attention_backend(
             and fp8_meta["recipe"].fp8_dpa
             and qkv_format == "thd"
             and cp_comm_type != "a2a"
+            and not (cp_comm_type == "p2p" and fp8_recipe.delayed())
         ):
-            # a2a is admitted: AttnFuncWithCPAndQKVOA2A threads cu_seqlens_*_padded into the
-            # per-rank fused_attn_fwd, and that kernel now honours padded offsets (Phase 1.1).
-            # p2p / all_gather / a2a+p2p stay disabled: their padded-offset paths for FP8 THD are
-            # not yet validated here (all_gather / a2a+p2p are already refused for THD above).
+            # a2a and delayed-scaling p2p are admitted: both thread cu_seqlens_*_padded into the
+            # per-rank fused_attn_fwd/bwd, and the p2p ring's delayed-FP8 THD half-gradient scatter is
+            # handled. all_gather / a2a+p2p stay disabled (already refused for THD above), and non-
+            # delayed p2p (current-scaling / mxfp8) is refused. The EFFECTIVE recipe (local_recipes[0])
+            # is used, so a mixed-metadata current-scaling p2p is not admitted through a delayed surrogate.
             logger.debug(
                 "Disabling FusedAttention as it does not support context parallelism with FP8"
-                " attention and THD format for cp_comm_type = %s (only a2a is supported)",
+                " attention and THD format for cp_comm_type = %s (a2a, or delayed-scaling p2p, only)",
                 cp_comm_type,
             )
             use_fused_attention = False

@@ -1,15 +1,12 @@
 """Which context-parallel comm types the FP8 THD backend admits, and that the narrowing is specific.
 
 Context parallelism pads each document to a multiple of 2*cp_size, so cu_seqlens_padded != cu_seqlens
-on every CP call. The per-rank kernel now addresses documents at their padded base (Phase 1.1), and
-only the a2a CP implementation (AttnFuncWithCPAndQKVOA2A) threads those padded offsets into it. So
-a2a is admitted for FP8 THD under CP; p2p, all_gather and a2a+p2p are not, because their padded-offset
-paths for FP8 THD are not yet validated here.
+on every CP call. The per-rank kernels thread those padded offsets, and a2a and (delayed-scaling) p2p
+both handle the FP8 THD forward and backward. So a2a and delayed p2p are admitted for FP8 THD under CP;
+current-scaling / mxfp8 p2p, all_gather and a2a+p2p are not.
 
-The admitted and refused sets are mutually falsifying: if the gate were widened to catch a2a as well,
-the a2a test would go NO_BACKEND; if it were dropped, the p2p test would leak through to the FP8
-sub-backend. Neither the BF16 THD path, the dense (BSHD) FP8 path, nor the non-CP FP8 path shares this
-narrowing, so each is pinned unaffected.
+Neither the BF16 THD path, the dense (BSHD) FP8 path, nor the non-CP FP8 path shares this narrowing,
+so each is pinned unaffected.
 
     python3 -m pytest test_fp8_thd_cp_gate.py -q -rA
 """
@@ -32,7 +29,8 @@ FP8_SUB_BACKEND = "FusedAttention/2"
 
 
 def selected_backend(config, *, context_parallel, cp_comm_type, layout="thd_thd_thd", fp8=True,
-                     mask="padding_causal", pad_between_seqs=True, softmax_type="vanilla"):
+                     mask="padding_causal", pad_between_seqs=True, softmax_type="vanilla",
+                     rec=None, local_recipes=None):
     """The backend the selector chooses for this CP configuration.
 
     pad_between_seqs defaults True because CP always produces padded != actual; the selector's CP
@@ -43,7 +41,11 @@ def selected_backend(config, *, context_parallel, cp_comm_type, layout="thd_thd_
         _attention_backends,
     )
 
-    rec = recipe.DelayedScaling(fp8_dpa=True) if fp8 else None
+    fp8_meta = None
+    if fp8:
+        fp8_meta = {"recipe": rec if rec is not None else recipe.DelayedScaling(fp8_dpa=True)}
+        if local_recipes is not None:
+            fp8_meta["local_recipes"] = local_recipes
     params = U.AttentionParams(
         qkv_type=torch.Tensor, qkv_dtype=torch.bfloat16, qkv_layout=layout,
         batch_size=3, num_heads=config.num_heads, num_gqa_groups=config.num_gqa_groups,
@@ -54,7 +56,7 @@ def selected_backend(config, *, context_parallel, cp_comm_type, layout="thd_thd_
         pad_between_seqs=pad_between_seqs, is_training=True, fp8=fp8,
         softmax_type=softmax_type,
         context_parallel=context_parallel, cp_comm_type=cp_comm_type,
-        fp8_meta={"recipe": rec} if rec is not None else None,
+        fp8_meta=fp8_meta,
     )
     # The chosen backend is cached; invalidate before querying so a previous answer is not returned,
     # and after, so the next attention call in this process selects for itself.
@@ -87,15 +89,36 @@ def test_fp8_thd_a2a_cp_selects_the_fp8_backend():
 # --------------------------------------------------------------------------------------
 
 
-def test_fp8_thd_p2p_cp_is_refused():
-    """p2p context parallelism over FP8 packed input is not admitted here.
-
-    p2p is the ring implementation for the global (non-SWA) layers; its FP8 THD padded-offset path
-    is a later chunk. This is the negative control for the a2a admission: same clause, same
-    precision and format, one comm type apart. If it leaked through, the narrowing would be wrong.
-    """
+def test_fp8_thd_p2p_delayed_cp_selects_the_fp8_backend():
+    """p2p with delayed scaling over FP8 packed input is admitted (the p2p enablement)."""
     got = selected_backend(PACKED_CONFIGS["omnii_8b_tp1"], context_parallel=True, cp_comm_type="p2p")
-    assert got != FP8_SUB_BACKEND, f"FP8 THD p2p CP was admitted: {got!r}"
+    assert got == FP8_SUB_BACKEND, f"FP8 THD p2p delayed CP selected {got!r}"
+
+
+def test_fp8_thd_p2p_current_scaling_is_refused():
+    got = selected_backend(
+        PACKED_CONFIGS["omnii_8b_tp1"], context_parallel=True, cp_comm_type="p2p",
+        rec=recipe.Float8CurrentScaling(fp8_dpa=True),
+    )
+    assert got != FP8_SUB_BACKEND, f"FP8 THD p2p current-scaling admitted: {got!r}"
+
+
+def test_fp8_thd_p2p_mxfp8_is_refused():
+    got = selected_backend(
+        PACKED_CONFIGS["omnii_8b_tp1"], context_parallel=True, cp_comm_type="p2p",
+        rec=recipe.MXFP8BlockScaling(fp8_dpa=True),
+    )
+    assert got != FP8_SUB_BACKEND, f"FP8 THD p2p mxfp8 admitted: {got!r}"
+
+
+def test_fp8_thd_p2p_mixed_metadata_current_is_refused():
+    """Effective recipe is local_recipes[0], so a delayed surrogate over current scaling stays refused."""
+    got = selected_backend(
+        PACKED_CONFIGS["omnii_8b_tp1"], context_parallel=True, cp_comm_type="p2p",
+        rec=recipe.DelayedScaling(fp8_dpa=True),
+        local_recipes=[recipe.Float8CurrentScaling(fp8_dpa=True)],
+    )
+    assert got != FP8_SUB_BACKEND, f"FP8 THD p2p mixed-metadata current admitted: {got!r}"
 
 
 @pytest.mark.parametrize("cp_comm_type", ["all_gather", "a2a+p2p"])
