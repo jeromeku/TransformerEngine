@@ -2782,7 +2782,15 @@ class AttnFuncWithCPAndKVP2P(torch.autograd.Function):
 
             # dkv correction
             if ctx.fp8 and ctx.fp8_recipe.delayed():
-                dkv = dkv_recv_buffer[(rank + i + 1) % cp_size]
+                dkv_slot = (rank + i + 1) % cp_size
+                if i < (cp_size - 1):
+                    # Non-local steps populate the all-to-all input by destination rank.
+                    dkv = dkv_recv_buffer[dkv_slot]
+                else:
+                    # The all-to-all output now holds the routed non-local gradients. Add the
+                    # final diagonal (local) gradient to that buffer before the reduction.
+                    assert dkv_slot == rank
+                    dkv = dkv_send_buffer[dkv_slot]
             elif ctx.fp8 and (ctx.fp8_recipe.float8_current_scaling() or ctx.fp8_recipe.mxfp8()):
                 dkv = dkv_buffer
             else:
@@ -2883,8 +2891,8 @@ class AttnFuncWithCPAndKVP2P(torch.autograd.Function):
             dq = dq_buffer
             if ctx.fp8_recipe.delayed():
                 # [cp, b, 2, sk//2, h, d] or [cp, 2, sk//2, b, h, d]
-                dk = dkv_recv_buffer[:, : ctx.k_numel].view(cp_size, *ctx.k_shape)
-                dv = dkv_recv_buffer[:, ctx.k_numel :].view(cp_size, *ctx.v_shape)
+                dk = dkv_send_buffer[:, : ctx.k_numel].view(cp_size, *ctx.k_shape)
+                dv = dkv_send_buffer[:, ctx.k_numel :].view(cp_size, *ctx.v_shape)
                 dq, dk, dv = [
                     ctx.dQKV_quantizer.create_tensor_from_data(
                         x, fake_dtype=bwd_nominal_dtype, internal=ctx.dQKV_quantizer.internal
