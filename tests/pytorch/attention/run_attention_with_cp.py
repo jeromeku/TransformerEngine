@@ -496,7 +496,10 @@ def run_dpa_with_cp(
     if is_training and config.softmax_type != "vanilla":
         core_attn.softmax_offset.requires_grad = True
 
-    # generate attention inputs
+    # generate attention inputs. Seed deterministically so the CP-vs-no-CP comparison is reproducible
+    # and independent of prior RNG state (e.g. earlier cases in the same pool worker).
+    torch.manual_seed(0)
+    torch.cuda.manual_seed_all(0)
     (
         q_input_shape,
         k_input_shape,
@@ -587,6 +590,10 @@ def run_dpa_with_cp(
     if not bench_iters:
         logging.info(f"[Rank {rank}] Run without context parallelism")
         if dtype == "fp8":
+            if not bench_iters and scaling_mode == "delayed":
+                # Match the delayed-scaling state the CP arm is reset to, so the reference and CP runs
+                # are compared at the same FP8 scale regardless of prior state in this (pool) process.
+                _reset_delayed_scaling_state(core_attn)
             fp8_context = autocast(
                 enabled=True, recipe=fp8_recipe, amax_reduction_group=cp_comm_group
             )
@@ -895,12 +902,12 @@ def run_dpa_with_cp(
     names_no_cp = [x + "_no_cp" for x in names]
     is_fp8 = dtype == "fp8"
 
-    # F3: the FP8 magnitude gate (utils.compare_and_assert) is calibrated only for a2a THD KV-head
-    # replication -- the case whose backward can silently drop the dK/dV replica-sum. Enable it there
-    # only; for every other comm type / layout / scaling it over-fires on legitimate noise (e.g.
-    # current-scaling sbhd dV, ratio dev ~0.358 > 0.35). This local wrapper bakes the scope in so the
-    # comparison call sites below are unchanged; default-off elsewhere restores the pre-gate suite.
-    _check_magnitude = is_fp8 and cp_comm_type == "a2a" and qkv_format == "thd"
+    # F3: the FP8 magnitude gate (utils.compare_and_assert) is enabled for the THD CP paths whose
+    # backward can silently mis-scale a gradient: a2a (a dropped dK/dV replica-sum) and p2p (a wrong
+    # THD half placement in the delayed-FP8 ring). For every other comm type / layout / scaling it
+    # over-fires on legitimate noise (e.g. current-scaling sbhd dV, ratio dev ~0.358 > 0.35), so it
+    # stays off there. This local wrapper bakes the scope in so the comparison call sites are unchanged.
+    _check_magnitude = is_fp8 and cp_comm_type in ("a2a", "p2p") and qkv_format == "thd"
 
     def compare_and_assert(a, b, name_a, name_b, atol, rtol, rmse_tol, is_fp8):
         _compare_and_assert(
