@@ -28,6 +28,7 @@ from transformer_engine.common.recipe import (
 )
 from transformer_engine.pytorch.attention.dot_product_attention.utils import (
     FlashAttentionUtils,
+    get_a2a_kv_head_replication_factor,
 )
 
 _current_file = pathlib.Path(__file__).resolve()
@@ -115,7 +116,7 @@ class PoolWorker:
         self._stderr_buf: deque[str] = deque(maxlen=self._STDERR_BUFFER_LINES)
 
     def _spawn(self) -> None:
-        te_path = os.getenv("TE_PATH", "/opt/transformerengine")
+        te_path = os.getenv("TE_PATH", str(_current_file.parents[3]))
         worker = os.path.join(
             te_path, "tests/pytorch/attention/run_attention_with_cp_pool.py"
         )
@@ -379,13 +380,7 @@ def test_cp_with_flash_attention(
     ):
         pytest.skip("No support for SWA with cp_comm_type={p2p, a2a+p2p}!")
 
-    if cp_comm_type in ["a2a", "a2a+p2p"] and (
-        config.num_heads % 2 != 0 or config.num_gqa_groups % 2 != 0
-    ):
-        pytest.skip(
-            f"cp_comm_type=a2a requires num_heads ({config.num_heads}) and"
-            f" num_gqa_groups ({config.num_gqa_groups}) divisible by 2!"
-        )
+    _require_a2a_head_partition(config, cp_comm_type, num_gpus)
 
     # FlashAttention / CP implementation specific: MLA only with KV P2P
     if "p2p" not in cp_comm_type and config.head_dim_qk != config.head_dim_v:
@@ -395,6 +390,7 @@ def test_cp_with_flash_attention(
         config,
         qkv_dtype=dtypes[dtype],
         qkv_layout="_".join([qkv_format] * 3),
+        cp_size=num_gpus,
     )
     flash_attn_supported, *_ = available_backends
     if not flash_attn_supported:
@@ -635,6 +631,25 @@ model_configs_fused_attn = {
         num_gqa_groups=10,
         attn_mask_type="causal",
     ),  # 15b: GQA, global-attention layer, vanilla softmax (p2p)
+    # The 15b TP2-local geometry. Five KV groups require structured x2 replication under CP2 A2A.
+    "cp_5_8": ModelConfig(
+        2,
+        4096,
+        20,
+        128,
+        num_gqa_groups=5,
+        attn_mask_type="causal",
+        window_size=(4096, 0),
+        softmax_type="learnable",
+    ),  # 15b TP2-local: sliding-window layer with a learnable sink.
+    "cp_5_9": ModelConfig(
+        2,
+        4096,
+        20,
+        128,
+        num_gqa_groups=5,
+        attn_mask_type="causal",
+    ),  # 15b TP2-local: global-attention layer with vanilla softmax.
 }
 
 
@@ -661,10 +676,35 @@ if test_essential:
         "cp_5_5",
         "cp_5_6",
         "cp_5_7",
+        "cp_5_8",
+        "cp_5_9",
     ]
     model_configs_fused_attn = {k: model_configs_fused_attn[k] for k in configs}
     dtypes = ["bf16", "fp8"]
     qkv_formats = ["sbhd", "thd"]
+
+
+def _require_a2a_head_partition(config, cp_comm_type, cp_size):
+    """Skip only geometries that remain indivisible after supported A2A KV replication."""
+    assert cp_size > 0
+    if cp_comm_type == "a2a":
+        factor = get_a2a_kv_head_replication_factor(
+            config.num_heads, config.num_gqa_groups, cp_size
+        )
+        working_num_gqa_groups = factor * config.num_gqa_groups
+        if config.num_heads % cp_size == 0 and working_num_gqa_groups % cp_size == 0:
+            return
+        pytest.skip(
+            f"pure a2a cannot partition {config.num_heads} Q / {config.num_gqa_groups} KV heads "
+            f"at CP={cp_size} after structured KV replication factor {factor}"
+        )
+    if cp_comm_type == "a2a+p2p":
+        if config.num_heads % 2 == 0 and config.num_gqa_groups % 2 == 0:
+            return
+        pytest.skip(
+            f"a2a+p2p requires {config.num_heads} Q and {config.num_gqa_groups} KV heads "
+            "divisible by its two-rank A2A subgroup"
+        )
 
 
 @pytest.mark.skipif(get_cudnn_version() < (8, 9, 7), reason="cuDNN 8.9.7+ is required.")
@@ -743,13 +783,7 @@ def test_cp_with_fused_attention(
     ]:
         pytest.skip("No support for SWA with cp_comm_type={p2p, a2a+p2p}!")
 
-    if cp_comm_type in ["a2a", "a2a+p2p"] and (
-        config.num_heads % 2 != 0 or config.num_gqa_groups % 2 != 0
-    ):
-        pytest.skip(
-            f"cp_comm_type=a2a requires num_heads ({config.num_heads}) and"
-            f" num_gqa_groups ({config.num_gqa_groups}) divisible by 2!"
-        )
+    _require_a2a_head_partition(config, cp_comm_type, num_gpus)
 
     if config.softmax_type != "vanilla" and cp_comm_type != "a2a":
         pytest.skip(
@@ -815,6 +849,7 @@ def test_cp_with_fused_attention(
         fp8_meta=fp8_meta,
         is_training=is_training,
         deterministic=_deterministic,
+        cp_size=num_gpus,
     )
 
     _, fused_attn_supported, _ = available_backends
@@ -907,6 +942,7 @@ def test_cp_with_fused_attention(
         (40, 10, 2, 1),  # 15b, already divisible
         (40, 10, 4, 2),  # 15b at CP=4: 10 -> x2 -> 20
         (40, 10, 8, 4),  # 15b at CP=8: 10 -> x4 -> 40
+        (20, 5, 2, 2),  # 15b TP2-local at CP=2: 5 -> x2 -> 10
         (16, 16, 4, 1),  # MHA, already divisible
         (16, 3, 4, 1),  # fanout 16/3 non-integer -> not clean GQA -> 1
     ],
@@ -930,6 +966,42 @@ def test_a2a_kv_head_replication_factor_table(num_q_heads, num_kv_heads, cp_size
         assert (got * num_kv_heads) % cp_size == 0, "replicated KV heads must be cp_size-divisible"
 
 
+@pytest.mark.skipif(get_cudnn_version() < (8, 9, 7), reason="cuDNN 8.9.7+ is required.")
+@pytest.mark.skipif(get_device_compute_capability() < (9, 0), reason="THD requires sm90+.")
+@pytest.mark.parametrize("model", ["cp_5_8", "cp_5_9"])
+@pytest.mark.parametrize("dtype", ["bf16", "fp8"])
+def test_a2a_tp2_local_kv_head_replication(cp_pool, dtype, model):
+    """Gate the 15b TP2-local 20Q/5KV shape through public A2A selection and backward."""
+    if torch.cuda.device_count() < 2:
+        pytest.skip("TP2-local A2A replication requires two GPUs")
+    config = model_configs_fused_attn[model]
+    factor = get_a2a_kv_head_replication_factor(
+        config.num_heads, config.num_gqa_groups, 2
+    )
+    assert factor == 2
+    assert config.num_heads % 2 == 0
+    assert (factor * config.num_gqa_groups) % 2 == 0
+
+    fp8 = dtype == "fp8"
+    if fp8 and config.softmax_type != "vanilla":
+        pytest.skip(f"{model}: FP8 does not support softmax_type={config.softmax_type} on packed")
+    pool = cp_pool(2)
+    _submit(
+        pool,
+        dtype=dtype,
+        model=model,
+        qkv_format="thd",
+        kernel_backend="FusedAttention",
+        cp_comm_type="a2a",
+        fp8_bwd=fp8,
+        fp8_dpa=fp8,
+        fp8_mha=False,
+        scaling_mode="delayed" if fp8 else None,
+        f16_O=not fp8,
+        is_training=True,
+        deterministic=False,
+        log_level=pytest_logging_level,
+    )
 @pytest.mark.skipif(get_cudnn_version() < (8, 9, 7), reason="cuDNN 8.9.7+ is required.")
 @pytest.mark.skipif(get_device_compute_capability() < (9, 0), reason="THD requires sm90+.")
 @pytest.mark.parametrize("model", ["cp_5_1", "cp_5_7", "cp_5_0", "cp_5_6"])

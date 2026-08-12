@@ -366,6 +366,7 @@ def get_available_attention_backends(
     fp8_meta: Optional[Dict[str, Any]] = None,
     is_training: bool = True,
     inference_params: Optional[InferenceParams] = None,
+    cp_size: int = 1,
 ) -> Tuple[List, List]:
     """Check for all available attention backends that support a model configuration"""
 
@@ -420,6 +421,7 @@ def get_available_attention_backends(
             attention_dropout=config.dropout_p,
             context_parallel=config.context_parallel,
             cp_comm_type=config.cp_comm_type,
+            cp_size=cp_size,
             deterministic=deterministic,
             fp8=fp8,
             fp8_meta=fp8_meta,
